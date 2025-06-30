@@ -1,6 +1,8 @@
+import torch
 import matplotlib.pyplot as plt
 import numpy as np
-from torchvision.transforms import ToPILImage
+from torchvision.transforms import ToPILImage, Compose, Resize, CenterCrop, ToTensor
+from torchvision import datasets
 
 def plot_dataset_examples(train_loader, n_classes, std, mean):
   images = {}
@@ -34,6 +36,29 @@ def plot_dataset_examples(train_loader, n_classes, std, mean):
 
   plt.tight_layout()
   plt.show()
+
+# Given the path of the downloaded dice dataset files this function computes the mean and std
+def compute_dice_mean_and_std(path):
+    
+    # Define transformations to be applied to the images
+    transform = Compose([
+        Resize(256),
+        CenterCrop(224),
+        # Normalize(mean=mean, std=std),
+        ToTensor()
+    ])
+
+    # Load the dataset using ImageFolder (implicitly assumes directories for class labels)
+    dataset = datasets.ImageFolder(root=path, transform=transform)
+
+    images, _ = zip(*dataset)
+    images_tensor = torch.stack(images, dim=0)
+
+    dim = [0, 2, 3]
+
+    mean, std = torch.mean(images_tensor, dim=dim), torch.std(images_tensor, dim=dim)
+
+    return mean, std
 
 if __name__ == '__main__':
     from get_dataloaders import get_pokemon_dataloader
