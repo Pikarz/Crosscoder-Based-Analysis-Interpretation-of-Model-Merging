@@ -32,4 +32,4 @@ if __name__ == '__main__':
     validation_size = 0.2
     test_size       = 0.1
 
-    pokemon_dataloader = get_dataloader(pokemon_dataset, batch_size, training_size, validation_size, test_size)
+    pokemon_dataloader = get_dataloaders(pokemon_dataset, batch_size, training_size, validation_size, test_size)
