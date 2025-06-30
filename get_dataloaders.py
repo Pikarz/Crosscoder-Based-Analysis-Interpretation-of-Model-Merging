@@ -20,7 +20,7 @@ def get_dataloader(dataset, batch_size, training_size, validation_size, test_siz
     print(f'Validation size (batch): {len(val_loader)}')
     print(f'Test size (batch): {len(test_loader)}')
 
-    return train_loader, test_loader, val_loader
+    return train_loader, val_loader, test_loader
 
 
 if __name__ == '__main__':
