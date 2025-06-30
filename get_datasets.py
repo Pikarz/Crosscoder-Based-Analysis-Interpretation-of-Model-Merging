@@ -37,7 +37,7 @@ def get_dice_dataset():
     # Download dice dataset latest version
     path = kagglehub.dataset_download("ucffool/dice-d4-d6-d8-d10-d12-d20-images")
 
-    # already calculated by running get_dice_mean_and_std.py
+    # already calculated by running get_dice_mean_and_std() on utils.py
     mean = [0.6590, 0.6188, 0.6082]
     std = [0.2242, 0.2224, 0.2398]
 
