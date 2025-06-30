@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 import numpy as np
 
-def get_dataloader(dataset, batch_size, training_size, validation_size, test_size):
+def get_dataloaders(dataset, batch_size, training_size, validation_size, test_size):
 
     assert np.allclose(np.array(training_size + validation_size + test_size), 1), "The splits must sum to one"
 
