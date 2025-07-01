@@ -38,6 +38,8 @@ def plot_dataset_examples(train_loader, n_classes, std, mean):
   plt.tight_layout()
   plt.show()
 
+  ## test
+
 # Given the path of the downloaded dice dataset files this function computes the mean and std
 def compute_dice_mean_and_std(path):
     
