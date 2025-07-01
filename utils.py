@@ -4,6 +4,7 @@ import numpy as np
 from torchvision.transforms import ToPILImage, Compose, Resize, CenterCrop, ToTensor
 from torchvision import datasets
 
+#Function to plot datasets, all the classes
 def plot_dataset_examples(train_loader, n_classes, std, mean):
   images = {}
 
