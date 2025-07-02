@@ -1,0 +1,43 @@
+{
+  "os":  "Windows-11-10.0.26100-SP0",
+  "python":  "CPython 3.13.4",
+  "startedAt":  "2025-07-02T12:20:56.908926Z",
+  "program":  "d:\\study\\Magistrale\\Primo Anno\\Secondo Semestre\\Deep Learning\\project\\resnet_model.py",
+  "codePath":  "resnet_model.py",
+  "git":  {
+    "remote":  "git@github.com:Pikarz/Crosscoder-Based-Analysis-Interpretation-of-Model-Merging.git",
+    "commit":  "9270024b5dd76879614bd6f57e55c15adf314387"
+  },
+  "email":  "dipietro.1960447@studenti.uniroma1.it",
+  "root":  "D:\\study\\Magistrale\\Primo Anno\\Secondo Semestre\\Deep Learning\\project",
+  "host":  "PARROTMOBILE-v2",
+  "executable":  "C:\\Users\\Anthony322\\anaconda3\\envs\\deep_learning\\python.exe",
+  "codePathLocal":  "resnet_model.py",
+  "cpu_count":  8,
+  "cpu_count_logical":  16,
+  "gpu":  "NVIDIA GeForce RTX 5080",
+  "gpu_count":  1,
+  "disk":  {
+    "/":  {
+      "total":  "1572862947328",
+      "used":  "628096589824"
+    }
+  },
+  "memory":  {
+    "total":  "66157801472"
+  },
+  "cpu":  {
+    "count":  8,
+    "countLogical":  16
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "NVIDIA GeForce RTX 5080",
+      "memoryTotal":  "17094934528",
+      "cudaCores":  10752,
+      "architecture":  "Blackwell",
+      "uuid":  "GPU-3d20713c-13c5-77f2-8c2e-66d479dddfc6"
+    }
+  ],
+  "cudaVersion":  "12.9"
+}

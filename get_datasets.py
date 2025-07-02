@@ -8,9 +8,11 @@ from PokemonDataset import PokemonDataset
 
 from datasets import load_dataset # hugging face dependency
 
+PKMN_DATASET = "manuel-yao/pokemon-keras-community"
+DICE_DATASET = "ucffool/dice-d4-d6-d8-d10-d12-d20-images"
 
 def get_pokemon_dataset():
-    pokemon_dataset = load_dataset("manuel-yao/pokemon-keras-community", split='train')
+    pokemon_dataset = load_dataset(PKMN_DATASET, split='train')
 
     # The PokemonDataset will help us manage the data with the associated labels
     # it can also implement a series of transformations in input
@@ -35,7 +37,7 @@ def get_pokemon_dataset():
 
 def get_dice_dataset():
     # Download dice dataset latest version
-    path = kagglehub.dataset_download("ucffool/dice-d4-d6-d8-d10-d12-d20-images")
+    path = kagglehub.dataset_download(DICE_DATASET)
 
     # already calculated by running get_dice_mean_and_std() on utils.py
     mean = [0.6590, 0.6188, 0.6082]
@@ -54,10 +56,10 @@ def get_dice_dataset():
     dataset_1 = datasets.ImageFolder(root=path+'\\dice\\train', transform=transform)
     dataset_2 = datasets.ImageFolder(root=path+'\\dice\\valid', transform=transform)
 
-    l = []
-    l.append(dataset_1)
-    l.append(dataset_2)
-    image_datasets = torch.utils.data.ConcatDataset(l)
+    all_dice = []
+    all_dice.append(dataset_1)
+    all_dice.append(dataset_2)
+    image_datasets = torch.utils.data.ConcatDataset(all_dice)
 
     return image_datasets
 

@@ -3,6 +3,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 from torchvision.transforms import ToPILImage, Compose, Resize, CenterCrop, ToTensor
 from torchvision import datasets
+import random
+
+def seed_run():
+  torch.manual_seed(42)
+  np.random.seed(42)
+  random.seed(0)
+
+  torch.cuda.manual_seed(0)
+  torch.backends.cudnn.deterministic = True
+  torch.backends.cudnn.benchmark = False
 
 #Function to plot datasets, all the classes
 def plot_dataset_examples(train_loader, n_classes, std, mean):
@@ -61,8 +71,9 @@ def compute_dice_mean_and_std(path):
 
     return mean, std
 
+
 if __name__ == '__main__':
-    from get_dataloaders import get_pokemon_dataloader
+    from get_dataloaders import get_dataloaders
     from get_datasets import get_pokemon_dataset
 
     pokemon_dataset = get_pokemon_dataset()
@@ -70,7 +81,9 @@ if __name__ == '__main__':
     training_size   = 0.7
     validation_size = 0.2
     test_size       = 0.1
+    number_classes  = 5
 
-    train_loader, validation_loader, test_loader = get_pokemon_dataloader(pokemon_dataset, batch_size, training_size, validation_size, test_size)
+    train_loader, validation_loader, test_loader = get_dataloaders(pokemon_dataset, batch_size, training_size, validation_size, test_size)
 
-    plot_dataset_examples(train_loader, 5, pokemon_dataset.std, pokemon_dataset.mean)
+    plot_dataset_examples(train_loader, number_classes, pokemon_dataset.std, pokemon_dataset.mean)
+    
