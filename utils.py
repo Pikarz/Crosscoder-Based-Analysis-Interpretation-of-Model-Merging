@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import matplotlib.pyplot as plt
 import numpy as np
 from torchvision.transforms import ToPILImage
@@ -8,6 +9,29 @@ def plot_dataset_examples(train_loader, n_classes, std, mean):
   for data in train_loader.dataset:
     image = data['data']
     label_tensor = data['label']
+=======
+import torch
+import matplotlib.pyplot as plt
+import numpy as np
+from torchvision.transforms import ToPILImage, Compose, Resize, CenterCrop, ToTensor
+from torchvision import datasets
+import random
+
+def seed_run():
+  torch.manual_seed(42)
+  np.random.seed(42)
+  random.seed(0)
+
+  torch.cuda.manual_seed(0)
+  torch.backends.cudnn.deterministic = True
+  torch.backends.cudnn.benchmark = False
+
+#Function to plot datasets, all the classes
+def plot_dataset_examples(train_loader, n_classes, std, mean):
+  images = {}
+
+  for (image, label_tensor) in train_loader.dataset:
+>>>>>>> anthony_refactor
     label = label_tensor.item()
 
     if label not in images.keys():
@@ -35,8 +59,39 @@ def plot_dataset_examples(train_loader, n_classes, std, mean):
   plt.tight_layout()
   plt.show()
 
+<<<<<<< HEAD
 if __name__ == '__main__':
     from get_dataloaders import get_pokemon_dataloader
+=======
+  ## test
+
+# Given the path of the downloaded dice dataset files this function computes the mean and std
+def compute_dice_mean_and_std(path):
+    
+    # Define transformations to be applied to the images
+    transform = Compose([
+        Resize(256),
+        CenterCrop(224),
+        # Normalize(mean=mean, std=std),
+        ToTensor()
+    ])
+
+    # Load the dataset using ImageFolder (implicitly assumes directories for class labels)
+    dataset = datasets.ImageFolder(root=path, transform=transform)
+
+    images, _ = zip(*dataset)
+    images_tensor = torch.stack(images, dim=0)
+
+    dim = [0, 2, 3]
+
+    mean, std = torch.mean(images_tensor, dim=dim), torch.std(images_tensor, dim=dim)
+
+    return mean, std
+
+
+if __name__ == '__main__':
+    from get_dataloaders import get_dataloaders
+>>>>>>> anthony_refactor
     from get_datasets import get_pokemon_dataset
 
     pokemon_dataset = get_pokemon_dataset()
@@ -44,7 +99,16 @@ if __name__ == '__main__':
     training_size   = 0.7
     validation_size = 0.2
     test_size       = 0.1
+<<<<<<< HEAD
 
     train_loader, validation_loader, test_loader = get_pokemon_dataloader(pokemon_dataset, batch_size, training_size, validation_size, test_size)
 
     plot_dataset_examples(train_loader, 5, pokemon_dataset.std, pokemon_dataset.mean)
+=======
+    number_classes  = 5
+
+    train_loader, validation_loader, test_loader = get_dataloaders(pokemon_dataset, batch_size, training_size, validation_size, test_size)
+
+    plot_dataset_examples(train_loader, number_classes, pokemon_dataset.std, pokemon_dataset.mean)
+    
+>>>>>>> anthony_refactor
