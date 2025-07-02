@@ -1,4 +1,3 @@
 ./dice_resnet
 ./pokemon_resnet
-./__pycache__
 ./wandb
