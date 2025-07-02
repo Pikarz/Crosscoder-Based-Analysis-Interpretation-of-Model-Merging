@@ -8,9 +8,7 @@ from torchvision import datasets
 def plot_dataset_examples(train_loader, n_classes, std, mean):
   images = {}
 
-  for data in train_loader.dataset:
-    image = data['data']
-    label_tensor = data['label']
+  for (image, label_tensor) in train_loader.dataset:
     label = label_tensor.item()
 
     if label not in images.keys():
