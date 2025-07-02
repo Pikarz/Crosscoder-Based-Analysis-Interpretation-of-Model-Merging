@@ -1,15 +1,3 @@
-<<<<<<< HEAD
-import matplotlib.pyplot as plt
-import numpy as np
-from torchvision.transforms import ToPILImage
-
-def plot_dataset_examples(train_loader, n_classes, std, mean):
-  images = {}
-
-  for data in train_loader.dataset:
-    image = data['data']
-    label_tensor = data['label']
-=======
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,7 +19,6 @@ def plot_dataset_examples(train_loader, n_classes, std, mean):
   images = {}
 
   for (image, label_tensor) in train_loader.dataset:
->>>>>>> anthony_refactor
     label = label_tensor.item()
 
     if label not in images.keys():
@@ -59,10 +46,6 @@ def plot_dataset_examples(train_loader, n_classes, std, mean):
   plt.tight_layout()
   plt.show()
 
-<<<<<<< HEAD
-if __name__ == '__main__':
-    from get_dataloaders import get_pokemon_dataloader
-=======
   ## test
 
 # Given the path of the downloaded dice dataset files this function computes the mean and std
@@ -91,7 +74,6 @@ def compute_dice_mean_and_std(path):
 
 if __name__ == '__main__':
     from get_dataloaders import get_dataloaders
->>>>>>> anthony_refactor
     from get_datasets import get_pokemon_dataset
 
     pokemon_dataset = get_pokemon_dataset()
@@ -99,16 +81,9 @@ if __name__ == '__main__':
     training_size   = 0.7
     validation_size = 0.2
     test_size       = 0.1
-<<<<<<< HEAD
-
-    train_loader, validation_loader, test_loader = get_pokemon_dataloader(pokemon_dataset, batch_size, training_size, validation_size, test_size)
-
-    plot_dataset_examples(train_loader, 5, pokemon_dataset.std, pokemon_dataset.mean)
-=======
     number_classes  = 5
 
     train_loader, validation_loader, test_loader = get_dataloaders(pokemon_dataset, batch_size, training_size, validation_size, test_size)
 
     plot_dataset_examples(train_loader, number_classes, pokemon_dataset.std, pokemon_dataset.mean)
     
->>>>>>> anthony_refactor

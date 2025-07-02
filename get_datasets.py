@@ -1,14 +1,4 @@
 import torch
-<<<<<<< HEAD
-from datasets import load_dataset
-from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Lambda
-
-from PokemonDataset import PokemonDataset
-
-
-def get_pokemon_dataset():
-    pokemon_dataset = load_dataset("manuel-yao/pokemon-keras-community", split='train')
-=======
 import kagglehub
 
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Lambda, Normalize
@@ -23,7 +13,6 @@ DICE_DATASET = "ucffool/dice-d4-d6-d8-d10-d12-d20-images"
 
 def get_pokemon_dataset():
     pokemon_dataset = load_dataset(PKMN_DATASET, split='train')
->>>>>>> anthony_refactor
 
     # The PokemonDataset will help us manage the data with the associated labels
     # it can also implement a series of transformations in input
@@ -46,8 +35,6 @@ def get_pokemon_dataset():
 
     return pokemon_dataset
 
-<<<<<<< HEAD
-=======
 def get_dice_dataset():
     # Download dice dataset latest version
     path = kagglehub.dataset_download(DICE_DATASET)
@@ -76,7 +63,6 @@ def get_dice_dataset():
 
     return image_datasets
 
->>>>>>> anthony_refactor
 if __name__ == '__main__':
     dataset = get_pokemon_dataset()
     print(dataset)

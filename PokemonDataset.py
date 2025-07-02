@@ -34,8 +34,4 @@ class PokemonDataset(Dataset):
       x = self.data[idx]         # [C,H,W]
       x = (x - self.mean) / self.std
       y = self.labels[idx]
-<<<<<<< HEAD
-      return {'data': x, 'label': y}
-=======
       return [x, y]
->>>>>>> anthony_refactor
