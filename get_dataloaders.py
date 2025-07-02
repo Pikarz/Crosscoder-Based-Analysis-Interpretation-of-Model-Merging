@@ -12,13 +12,13 @@ def get_dataloaders(dataset, batch_size, training_size, validation_size, test_si
     val_loader = DataLoader(valid_set, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
 
-    print(f'Train dataset size: {len(train_set)}')
-    print(f'Validation size: {len(valid_set)}')
-    print(f'Test size: {len(test_set)}')
+    # print(f'Train dataset size: {len(train_set)}')
+    # print(f'Validation size: {len(valid_set)}')
+    # print(f'Test size: {len(test_set)}')
 
-    print(f'Train size (batch): {len(train_loader)}')
-    print(f'Validation size (batch): {len(val_loader)}')
-    print(f'Test size (batch): {len(test_loader)}')
+    # print(f'Train size (batch): {len(train_loader)}')
+    # print(f'Validation size (batch): {len(val_loader)}')
+    # print(f'Test size (batch): {len(test_loader)}')
 
     return train_loader, val_loader, test_loader
 
