@@ -7,3 +7,9 @@
 
 # WandB logs
 /wandb/
+
+# CrossCoder dataset
+/activations/
+
+# cache
+__pycache__/
