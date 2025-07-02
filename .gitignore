@@ -1,3 +1,4 @@
 ./dice_resnet
 ./pokemon_resnet
 ./wandb
+./interpolated
