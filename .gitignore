@@ -1,4 +1,9 @@
-./dice_resnet
-./pokemon_resnet
-./wandb
-./interpolated
+# model output folders
+/dice_resnet/
+/pokemon_resnet/
+
+# interpolation outputs
+/interpolated/
+
+# WandB logs
+/wandb/
