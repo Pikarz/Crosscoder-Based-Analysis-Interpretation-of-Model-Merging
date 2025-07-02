@@ -63,6 +63,19 @@ def get_dice_dataset():
 
     return image_datasets
 
-if __name__ == '__main__':
-    dataset = get_pokemon_dataset()
-    print(dataset)
+def get_small_imagenet_dataset():
+    path = kagglehub.dataset_download("titericz/imagenet1k-val")
+    print("Path to dataset files:", path)
+
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+
+    transform = Compose([
+        Resize(256),
+        CenterCrop(224),
+        ToTensor(),
+        Normalize(mean=mean, std=std),
+    ])
+
+    imagenet_dataset = datasets.ImageFolder(root=path+'', transform=transform)
+    return imagenet_dataset
