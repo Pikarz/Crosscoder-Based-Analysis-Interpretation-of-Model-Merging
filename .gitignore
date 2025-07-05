@@ -13,3 +13,6 @@
 
 # cache
 __pycache__/
+
+# test stuff
+test.py

@@ -1,9 +1,9 @@
 import torch
 from pathlib import Path
-from get_datasets import get_small_imagenet_dataset
 from get_dataloaders import get_dataloaders
 from utils import get_equally_distributed_subset
 from tqdm import tqdm
+import os
 
 # def save_models_activations(models, dataloaders, activations_paths):
 #   # Create directories to store the activations
@@ -19,15 +19,13 @@ from tqdm import tqdm
 #     test_model_on_dataloaders(model, dataloaders)
 #     print(f'[OK] All activations have been saved')
     
-
-
 def create_crosscoder_dataset(  pokemon_dataset, dice_dataset, small_imagenet_dataset, batch_size,
                                 pkmn_net, dice_net, interpolated_net,
-                                activations_output_path, num_points_per_dataset):
+                                activations_output_path, crosscoder_datapoints, n_models=3):
 
     # equally distribute the data -- we have three subsets with an equal number of points
     print('[DEBUG] Preparing equally distributed subsets')
-    pkmn_subset, dice_subset, small_imagenet_subset = get_equally_distributed_subset(pokemon_dataset, dice_dataset, small_imagenet_dataset, num_points_per_dataset)
+    pkmn_subset, dice_subset, small_imagenet_subset = get_equally_distributed_subset(pokemon_dataset, dice_dataset, small_imagenet_dataset, n_models, crosscoder_datapoints)
 
     print(f'[DEBUG] Dataset Subsets Size:\n \
               Pokemon: {len(pkmn_subset)}\n \
@@ -49,39 +47,57 @@ def create_crosscoder_dataset(  pokemon_dataset, dice_dataset, small_imagenet_da
     for model, activation_path in zip(models, activations_output_path):
       create_hooks_and_test_model(model, dataloaders, activation_path)
 
-def create_hooks(model, activations_path, skip_modules=('fc')):
+### Create hooks allow us to save the activations along every layer of our ResNet during the forward pass
+def create_hooks(model, activations_path, conv='conv'):
   # Hook factory
   def get_hook(name, activations_path):
     def hook(module, inp, out):
       torch.save(out.detach(), f"{activations_path}/{name}.torch") # detach so we don’t keep the computation graph
-      handle.remove()
+      handle.remove() # removes the hook once it has finished its job
 
     return hook
   
   counter = 0
   for name, module in model.named_modules():
-      if name in skip_modules: # we don't care about the head
-        continue
-
-      handle = module.register_forward_hook(get_hook(name, activations_path))
-      counter += 1
+      if conv in name: # We get only the module 'conv'
+        handle = module.register_forward_hook(get_hook(name, activations_path))
+        counter += 1
 
 # multiple dataloaders test
-def create_hooks_and_test_model(model, test_loaders, model_path):
+def create_hooks_and_test_model(model, data_loaders, model_path):
   device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+  count = 0
+
   with torch.no_grad():
+    for data_loaders in data_loaders:
+      loop = tqdm(enumerate(data_loaders), total=len(data_loaders), desc="Computing Activations", leave=True)
+      for _, (test_inputs, _) in loop: # we don't need the labels at all
+        activations_path = model_path + '/activations_' + str(count)
+        count += 1
+        Path(activations_path).mkdir(parents=True, exist_ok=True) # create directory
 
-    for i, test_loader in enumerate(test_loaders):
-      print(f'[DEBUG] Started dataloader {i}')
-      activations_path = model_path + '/loader_' + str(i)
-
-      loop = tqdm(enumerate(test_loader), total=len(test_loader), desc="Computing Activations", leave=True)
-      for batch_idx, (test_inputs, _) in loop: # we don't need the labels at all
-        activations_batch_path = activations_path + '/batch_' + str(batch_idx)
-        Path(activations_batch_path).mkdir(parents=True, exist_ok=True) # create directory
-
-        create_hooks(model, activations_batch_path)
+        create_hooks(model, activations_path)
         test_inputs = test_inputs.to(device)
 
         # preds
         test_outputs = model(test_inputs)
+
+def get_model_activations(path, activations_tensors=[], activations=torch.as_tensor([])):
+  if os.path.isfile(path) and path.endswith('.torch'): # We found a tensor inside the recursive tree. The second condition is always true, it's there just to clarify things
+    activations_layer = torch.load(path).cpu().view(-1)      # We view the activations as a single-dimensional tensor
+    activations = torch.cat([activations, activations_layer])
+    return activations_tensors, activations
+  
+  #print(f'[DEBUG] Checking folder {path}')
+  content = os.listdir(path) 
+
+  for file in content:    # We iterate within the content of the current folder. We have two cases: either it is another folder, or it is a tensor and we load it
+    subpath = os.path.join(path, file)
+    activations_tensors, activations = get_model_activations(subpath, activations_tensors, activations)
+
+  if activations.size()[0] > 0: # if there's at least a .torch file in the current list
+    # print('[DEBUG] Adding new activations...')
+    activations_tensors.append(activations)
+    activations = torch.as_tensor([])
+    
+  return activations_tensors, activations

@@ -71,11 +71,13 @@ def compute_dice_mean_and_std(path):
 
     return mean, std
 
-def get_equally_distributed_subset(pokemon_dataset, dice_dataset, small_imagenet_dataset,
-                                    num_points_per_dataset=None):    
+def get_equally_distributed_subset(pokemon_dataset, dice_dataset, small_imagenet_dataset, n_models,
+                                    crosscoder_datapoints=None):    
     # If we do not set a number of datapoints per dataset, we just take the smallest possible number so that the whole dataset remains equally distributed among the three different datasets
-    if not num_points_per_dataset:
-       num_points_per_dataset = min(len(pokemon_dataset), len(dice_dataset), len(small_imagenet_dataset))
+    if not crosscoder_datapoints:
+      num_points_per_dataset = min(len(pokemon_dataset), len(dice_dataset), len(small_imagenet_dataset))
+    else:
+      num_points_per_dataset = int(crosscoder_datapoints // n_models) # we take the integer
     
     # Get subsets so that all datasets have an equal number of datapoints
     pkmn_subset             = torch.utils.data.Subset(pokemon_dataset, np.arange(0, num_points_per_dataset))
