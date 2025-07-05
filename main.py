@@ -6,14 +6,17 @@ from get_datasets import get_small_imagenet_dataset
 from get_dataloaders import get_dataloaders
 from utils import seed_run
 from resnet_model import finetune_resnet, load_resnet_from_weights, interpolate_resnet_models, test_resnet
-from create_crosscoder_dataset import create_crosscoder_dataset
+from crosscoder_dataset_utils import create_crosscoder_dataset
+from CrossCoderDataset import CrossCoderDataset
+from CrossCoder import CrossCoder, train_crosscoder
 
 #### CONFIG ####
-TRAIN                       = False # Variable to either do the actual trainining/interpolation or get the already-finetuned/interpolated versions
-CREATE_CROSSCODER_DATASET   = True
+TRAIN                       = False # Do the actual trainining/interpolation or get the already-finetuned/interpolated versions
+TEST                        = False # Test models or skip it
+CREATE_CROSSCODER_DATASET   = False # Create the dataset or use the already-created one
 PROJECT_NAME                = 'deep_learning'
 
-# same across all the fine-tuned models
+# Same across all the fine-tuned models
 BATCH_SIZE      = 32
 NUM_EPOCHS      = 10
 TRAINING_SIZE   = 0.7
@@ -25,8 +28,8 @@ MOMENTUM        = 0.9
 PKMN_WEIGHTS_PATH   = './pokemon_resnet/model_weights.pth'
 PKMN_NUM_CLASSES    = 5 # num of pokemons in the dataset
 
-DICE_NUM_CLASSES    = 6 # num of dice in the dataset
 DICE_WEIGHTS_PATH   ='./dice_resnet/model_weights.pth'
+DICE_NUM_CLASSES    = 6 # num of dice in the dataset
 
 ### Wandb data
 PKMN_CLASS_NAMES        = ['bulbasaur', 'charmander', 'mewtwo', 'pikachu', 'squirtle']
@@ -48,7 +51,7 @@ DICE_WANDB_CONFIG   = {
     "momentum": MOMENTUM,
     "architecture": "ResNet",
     "dataset": "ucffool/dice-d4-d6-d8-d10-d12-d20-images", # from Kaggle
-    "epochs": NUM_EPOCHS,
+    "epochs": NUM_EPOCHS
 }
 
 # Interpolation Config
@@ -57,18 +60,30 @@ DEFAULT_RESNET_HEAD     = 'model_weights_v3.pth'
 PKMN_HEAD               = 'model_weights_v3_pkmn.pth'
 DICE_HEAD               = 'model_weights_v3_dice.pth'
 
-# CrossCoder Dataset Config
-BATCH_SIZE_CROSS = 8
-# TRAIN_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS = 0.4, 0.1, 0.5 # weird split to actually train the crosscoder with sufficient data, we do not use train/val
-ACTIVATIONS_PATHS = ['./activations/pokemon', './activations/dice', './activations/interpolated']
-# Number of points per dataset -- we do not take everything because otherwise we would have terabytes of data
-NUM_POINTS_PER_DATASET = 20
+#### CrossCoder Dataset Config
+RESNET_BATCH_SIZE = 1 # number of images given to our resnets to compute a single set of activations
+# Number of datapoints generated per model (dimension [n_models, n_crosscoder_datapoints, n_activations]) -- we do not take everything because otherwise we would have terabytes of data
+N_CROSSCODER_DATAPOINTS = 6
+ACTIVATIONS_PATH = './activations'
+MODEL_ACTIVATIONS_PATHS = [f'{ACTIVATIONS_PATH}/pokemon', f'{ACTIVATIONS_PATH}/dice', f'{ACTIVATIONS_PATH}/interpolated']
+
+### CrossCoder Model Config
+BATCH_SIZE_CROSS = 2 # crosscoder batch -- number of datapoints fetched by the crosscoder dataloader
+NUM_EPOCHS_CROSS = 10
+LATENT_DIM = 224
+TRAINING_SIZE_CROSS   = 0.7
+VALIDATION_SIZE_CROSS = 0.1 # smaller validation because we only have to tune the latent_dim hyperparam
+TEST_SIZE_CROSS       = 0.2
+LR_CROSS = 5e-5
+LAMBDA_SPARSE = 2
+ADAM_BETA_1 = 0.9
+ADAM_BETA_2 = 0.999
 
 if __name__ == '__main__':
     seed_run() # We seed the run to replicate the results
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tags=['resnet', 'classification'],
+    device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    tags    = ['resnet', 'classification']
 
     ##### Pokemon Finetuning ####
     ### Prepare data
@@ -106,8 +121,9 @@ if __name__ == '__main__':
         pkmn_net = load_resnet_from_weights(PKMN_WEIGHTS_PATH, PKMN_NUM_CLASSES)
 
     ### Test 
-    pkmn_accuracy = test_resnet(pkmn_net, pkmn_test_loader)
-    print(f"[RESULT] Pokemon Resnet tested with an accuracy equal to {pkmn_accuracy:.4f}")
+    if TEST:
+        pkmn_accuracy = test_resnet(pkmn_net, pkmn_test_loader)
+        print(f"[RESULT] Pokemon Resnet tested with an accuracy equal to {pkmn_accuracy:.4f}")
 
     ##### End Pokemon Finetuning ####
 
@@ -148,8 +164,9 @@ if __name__ == '__main__':
         dice_net = load_resnet_from_weights(DICE_WEIGHTS_PATH, DICE_NUM_CLASSES)
 
     ### Test 
-    dice_accuracy = test_resnet(dice_net, dice_test_loader)
-    print(f"[RESULT] Dice Resnet tested with an accuracy equal to {dice_accuracy:.4f}")
+    if TEST:
+        dice_accuracy = test_resnet(dice_net, dice_test_loader)
+        print(f"[RESULT] Dice Resnet tested with an accuracy equal to {dice_accuracy:.4f}")
 
     ##### End Dice Finetuning #####
 
@@ -158,15 +175,19 @@ if __name__ == '__main__':
     resnet = torchvision.models.resnet50(weights='ResNet50_Weights.DEFAULT').to(device)
     resnet.fc.weight = pkmn_net.fc.weight
     resnet.fc.bias   = pkmn_net.fc.bias
-    resnet_pkmn_accuracy = test_resnet(resnet, pkmn_test_loader)
-    print(f"[RESULT] The original Resnet tested with an accuracy equal to {resnet_pkmn_accuracy:.4f} on the Pokemon Dataset")
+
+    if TEST:
+        resnet_pkmn_accuracy = test_resnet(resnet, pkmn_test_loader)
+        print(f"[RESULT] The original Resnet tested with an accuracy equal to {resnet_pkmn_accuracy:.4f} on the Pokemon Dataset")
     ### Default pretrained ResNet with modified head on Pokemon
 
     ### Default pretrained ResNet with modified head on Dice
     resnet.fc.weight = dice_net.fc.weight
     resnet.fc.bias   = dice_net.fc.bias
-    resnet_pkmn_accuracy = test_resnet(resnet, dice_test_loader)
-    print(f"[RESULT] The original Resnet tested with an accuracy equal to {resnet_pkmn_accuracy:.4f} on the Dice Dataset")
+
+    if TEST:
+        resnet_pkmn_accuracy = test_resnet(resnet, dice_test_loader)
+        print(f"[RESULT] The original Resnet tested with an accuracy equal to {resnet_pkmn_accuracy:.4f} on the Dice Dataset")
     ##### End of default Resnet Tests #####
 
     ##### Pokemon-Dice Interpolation and Tests #####
@@ -185,12 +206,14 @@ if __name__ == '__main__':
 
     dice_interpolated_model_path = OUT_INTERPOLATED_DIR+'/'+DICE_HEAD
     dice_interpolated = load_resnet_from_weights(dice_interpolated_model_path, DICE_NUM_CLASSES)
-    # Test on pkmn dataset
-    interpolated_pkmn_accuracy_on_pkmn = test_resnet(pkmn_interpolated, pkmn_test_loader)
-    print(f"[RESULT] Interpolated Resnet tested with an accuracy equal to {interpolated_pkmn_accuracy_on_pkmn:.4f} on the Pokemon Dataset")
-    # test on dice dataset
-    interpolated_pkmn_accuracy_on_dice = test_resnet(dice_interpolated, dice_test_loader)
-    print(f"[RESULT] Interpolated Resnet tested with an accuracy equal to {interpolated_pkmn_accuracy_on_dice:.4f} on the Dice Dataset")
+
+    if TEST:
+        # Test on pkmn dataset
+        interpolated_pkmn_accuracy_on_pkmn = test_resnet(pkmn_interpolated, pkmn_test_loader)
+        print(f"[RESULT] Interpolated Resnet tested with an accuracy equal to {interpolated_pkmn_accuracy_on_pkmn:.4f} on the Pokemon Dataset")
+        # test on dice dataset
+        interpolated_pkmn_accuracy_on_dice = test_resnet(dice_interpolated, dice_test_loader)
+        print(f"[RESULT] Interpolated Resnet tested with an accuracy equal to {interpolated_pkmn_accuracy_on_dice:.4f} on the Dice Dataset")
 
     ##### End Pokemon-Dice Interpolation and Tests #####
 
@@ -202,6 +225,30 @@ if __name__ == '__main__':
         # The small imagenet_dataset contains a small subset of the original imagenet, which should activate the "old" features, learned during the original training
         small_imagenet_dataset = get_small_imagenet_dataset()
 
-        create_crosscoder_dataset(pokemon_dataset, dice_dataset, small_imagenet_dataset, BATCH_SIZE_CROSS,\
+        create_crosscoder_dataset(pokemon_dataset, dice_dataset, small_imagenet_dataset, RESNET_BATCH_SIZE,\
                                 pkmn_net, dice_net, interpolated_net,
-                                ACTIVATIONS_PATHS, NUM_POINTS_PER_DATASET)
+                                MODEL_ACTIVATIONS_PATHS, N_CROSSCODER_DATAPOINTS)
+        
+    crosscoder_dataset = CrossCoderDataset(ACTIVATIONS_PATH)
+    n_activations = crosscoder_dataset.get_n_activations() # [n_models, n_crosscoder_datapoints, n_activations]
+    cross_train_loader, cross_val_loader, cross_test_loader = get_dataloaders(crosscoder_dataset, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS)
+    
+    # TODO validation on latent dim
+    crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    crosscoder.to(device)
+
+    param_size = 0
+    for param in crosscoder.parameters():
+        param_size += param.nelement() * param.element_size()
+    buffer_size = 0
+    for buffer in crosscoder.buffers():
+        buffer_size += buffer.nelement() * buffer.element_size()
+
+    size_all_mb = (param_size + buffer_size) / 1024**2
+    print('model size: {:.3f}MB'.format(size_all_mb))
+    train_crosscoder(crosscoder, cross_train_loader,
+                    NUM_EPOCHS_CROSS,
+                    LR_CROSS, ADAM_BETA_1, ADAM_BETA_2)
+        
+    

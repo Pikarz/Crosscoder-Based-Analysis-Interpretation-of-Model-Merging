@@ -2,11 +2,13 @@ import torch
 import kagglehub
 
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Lambda, Normalize
+from torch.utils.data import TensorDataset
 from torchvision import datasets
 
 from PokemonDataset import PokemonDataset
 
 from datasets import load_dataset # hugging face dependency
+#from crosscoder_dataset_utils import get_dataset_activations
 
 PKMN_DATASET = "manuel-yao/pokemon-keras-community"
 DICE_DATASET = "ucffool/dice-d4-d6-d8-d10-d12-d20-images"
@@ -79,3 +81,13 @@ def get_small_imagenet_dataset():
 
     imagenet_dataset = datasets.ImageFolder(root=path+'', transform=transform)
     return imagenet_dataset
+
+# def get_crosscoder_dataset(path):
+#     activations = get_dataset_activations(path)
+#     crosscoder_dataset = TensorDataset(activations)
+
+#     return crosscoder_dataset
+    
+# if __name__ == '__main__':
+#     crosscoder_dataset = get_crosscoder_dataset('./activations')
+#     print(len(crosscoder_dataset)) 
