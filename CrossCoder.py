@@ -2,7 +2,9 @@ import einops
 import torch
 from torch import nn
 from torch.nn.utils import clip_grad_norm_
+import torch.nn.functional as F
 from tqdm import tqdm, trange
+from torch.optim.lr_scheduler import ExponentialLR
 import wandb
 
 N_MODELS = 3
@@ -64,26 +66,29 @@ class CrossCoder(nn.Module):
   def forward(self, activations):
     # activations:  [crosscoder_batch, n_models, n_activations]
     activations_encoder = self.encode(activations)
-    activations_encoder_relu = nn.Relu(activations_encoder)
-    activations_reconstruct = self.decoder(activations_encoder_relu) # activations_dec is the reconstructions given our latent space
+    activations_encoder_relu = F.relu(activations_encoder)
+    activations_reconstruct = self.decode(activations_encoder_relu) # activations_dec is the reconstructions given our latent space
 
     return activations_reconstruct
-
-  def get_loss(self, activations):
+  
+  def get_loss(self, activations, l1_coeff):
     activations_encoder = self.encode(activations)
     print('[DEBUG] Activations encoded')
-    activations_reconstruct = self.decode(activations_encoder) 
+    activations_encoder_relu = F.relu(activations_encoder)
+    activations_reconstruct = self.decode(activations_encoder_relu) 
     print('[DEBUG] Activations reconstructed')
 
     reconstruction_loss = (activations_reconstruct - activations).pow(2)
 
     l2_per_batch = einops.reduce(reconstruction_loss, 'crosscoder_batch n_models n_activations -> crosscoder_batch', 'sum')
     l2_loss = l2_per_batch.mean()
-    decoder_norms = self.W_dec.norm(dim=-1) # [latent_dim n_models]
-    total_decoder_norm = decoder_norms.sum(dim=-1) # [latent_dim] -- the idea is that we want to maintain sparsity to reconstruct each dimension of the latent space
-    l1_loss = (activations_encoder * total_decoder_norm[None, :]).sum(-1).mean(0)
 
-    loss = l2_loss + self.lambda_sparse * l1_loss
+    decoder_norms = self.W_dec.norm(dim=-1) # [latent_dim n_models]
+    total_decoder_norm = einops.reduce(decoder_norms, 'latent_dim n_models -> latent_dim', 'sum') # the idea is that we want to maintain sparsity to reconstruct each dimension of the latent space
+    l1_loss = (activations_encoder_relu * total_decoder_norm[None, :]).sum(-1).mean(0)
+
+    loss = l2_loss + l1_coeff * l1_loss
+    print(f'l2: {l2_loss}\tl1_loss: {l1_coeff * l1_loss}')
 
     return loss
   
@@ -96,24 +101,31 @@ def get_lambdas(total_steps):
             return 1.0 - (step - 0.8 * total_steps) / (0.2 * total_steps)
     return LR_lambda
 
+def get_l1_coeff(step_counter, total_steps, lambda_sparse):
+    # Linearly increases from 0 to cfg["l1_coeff"] over the first 0.05 * self.total_steps steps, then keeps it constant
+    if step_counter < 0.05 * total_steps:
+        return lambda_sparse * step_counter / (0.05 * total_steps)
+    else:
+        return lambda_sparse
+
 def train_crosscoder(crosscoder, train_loader,
-                     num_epochs,
-                     lr, adam_beta_1, adam_beta_2):
+                     num_epochs, lr):
     
     print('[DEBUG] Start Training')
    
     optimizer = torch.optim.Adam(
         crosscoder.parameters(),
         lr=lr,
-        betas=(adam_beta_1, adam_beta_2),
+       # betas=(adam_beta_1, adam_beta_2),
     )
 
-    total_steps = len(train_loader) * num_epochs
+    total_steps = len(train_loader)
     lambdas = get_lambdas(total_steps)
    
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lambdas
-    )
+    # scheduler = torch.optim.lr_scheduler.LambdaLR(
+    #     optimizer, lambdas
+    # )
+    scheduler = ExponentialLR(optimizer, gamma=0.9)
 
     ### TODO WANDB  STUFF ###
 
@@ -121,24 +133,25 @@ def train_crosscoder(crosscoder, train_loader,
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     crosscoder.to(device)
 
+    # Training Phase
+    crosscoder.train()
+
     # Training loop
     for epoch in trange(num_epochs, desc="Epochs"): # trange is a shortcut of tqdm(range(...))
-        running_loss = 1
-        total_batches = 1
-
-        # Training Phase
-        crosscoder.train()
+        running_loss = 0
+        total_batches = 0
 
         loop = tqdm(enumerate(train_loader), total=len(train_loader), desc="Training", leave=True)
         for batch_idx, data in loop:
+            print(f'batch: {batch_idx}')
             # Get data to cuda if possible 
-            activations = data.to(device=device)
+            activations = data.to(device)
 
-            # Zero the parameter gradients
-            optimizer.zero_grad()
+            current_step = batch_idx + 1
+            l1_coeff = get_l1_coeff(current_step, total_steps, crosscoder.lambda_sparse)
 
             # Forward pass + Compute loss
-            loss = crosscoder.get_loss(activations)
+            loss = crosscoder.get_loss(activations, l1_coeff)
 
             # Backward pass and optimization
             loss.backward()
@@ -146,6 +159,8 @@ def train_crosscoder(crosscoder, train_loader,
 
             optimizer.step()
             scheduler.step()
+            # Zero the parameter gradients
+            optimizer.zero_grad()
 
             running_loss += loss.item()
             total_batches += 1
@@ -155,7 +170,7 @@ def train_crosscoder(crosscoder, train_loader,
         train_losses.append(avg_train_loss)
 
 
-        print(f'\n\tEpoch {epoch + 1}, Average Training Loss: {avg_train_loss:.4f}')
+        print(f'\nEpoch {epoch + 1}, Average Training Loss: {avg_train_loss:.4f}')
 
 
         # run.log({

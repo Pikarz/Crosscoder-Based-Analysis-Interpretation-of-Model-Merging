@@ -4,6 +4,7 @@ from get_dataloaders import get_dataloaders
 from utils import get_equally_distributed_subset
 from tqdm import tqdm
 import os
+import re
 
 # def save_models_activations(models, dataloaders, activations_paths):
 #   # Create directories to store the activations
@@ -21,7 +22,7 @@ import os
     
 def create_crosscoder_dataset(  pokemon_dataset, dice_dataset, small_imagenet_dataset, batch_size,
                                 pkmn_net, dice_net, interpolated_net,
-                                activations_output_path, crosscoder_datapoints, n_models=3):
+                                activations_output_path, crosscoder_datapoints, regex_activations, n_models=3):
 
     # equally distribute the data -- we have three subsets with an equal number of points
     print('[DEBUG] Preparing equally distributed subsets')
@@ -45,26 +46,27 @@ def create_crosscoder_dataset(  pokemon_dataset, dice_dataset, small_imagenet_da
 
     print('[DEBUG] Starting saving models activations')
     for model, activation_path in zip(models, activations_output_path):
-      create_hooks_and_test_model(model, dataloaders, activation_path)
+      create_hooks_and_test_model(model, dataloaders, activation_path, regex_activations)
 
 ### Create hooks allow us to save the activations along every layer of our ResNet during the forward pass
-def create_hooks(model, activations_path, conv='conv'):
+def create_hooks(model, activations_path, regex_activations):
   # Hook factory
   def get_hook(name, activations_path):
     def hook(module, inp, out):
-      torch.save(out.detach(), f"{activations_path}/{name}.torch") # detach so we don’t keep the computation graph
-      handle.remove() # removes the hook once it has finished its job
+      if bool( re.search(regex_activations, name) ):
+        torch.save(out.detach(), f"{activations_path}/{name}.torch") # detach so we don’t keep the computation graph
+        handle.remove() # removes the hook once it has finished its job
 
     return hook
   
   counter = 0
   for name, module in model.named_modules():
-      if conv in name: # We get only the module 'conv'
+     # if conv in name: # We get only the module 'conv'
         handle = module.register_forward_hook(get_hook(name, activations_path))
         counter += 1
 
 # multiple dataloaders test
-def create_hooks_and_test_model(model, data_loaders, model_path):
+def create_hooks_and_test_model(model, data_loaders, model_path, regex_activations):
   device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
   count = 0
 
@@ -76,7 +78,7 @@ def create_hooks_and_test_model(model, data_loaders, model_path):
         count += 1
         Path(activations_path).mkdir(parents=True, exist_ok=True) # create directory
 
-        create_hooks(model, activations_path)
+        create_hooks(model, activations_path, regex_activations)
         test_inputs = test_inputs.to(device)
 
         # preds

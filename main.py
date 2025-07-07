@@ -12,8 +12,9 @@ from CrossCoder import CrossCoder, train_crosscoder
 
 #### CONFIG ####
 TRAIN                       = False # Do the actual trainining/interpolation or get the already-finetuned/interpolated versions
-TEST                        = False # Test models or skip it
+TEST                        = False # Test models or skip tests
 CREATE_CROSSCODER_DATASET   = False # Create the dataset or use the already-created one
+TRAIN_CROSSCODER            = True  # Train or use the already-trained crosscoder
 PROJECT_NAME                = 'deep_learning'
 
 # Same across all the fine-tuned models
@@ -63,21 +64,20 @@ DICE_HEAD               = 'model_weights_v3_dice.pth'
 #### CrossCoder Dataset Config
 RESNET_BATCH_SIZE = 1 # number of images given to our resnets to compute a single set of activations
 # Number of datapoints generated per model (dimension [n_models, n_crosscoder_datapoints, n_activations]) -- we do not take everything because otherwise we would have terabytes of data
-N_CROSSCODER_DATAPOINTS = 6
+N_CROSSCODER_DATAPOINTS = 500
 ACTIVATIONS_PATH = './activations'
 MODEL_ACTIVATIONS_PATHS = [f'{ACTIVATIONS_PATH}/pokemon', f'{ACTIVATIONS_PATH}/dice', f'{ACTIVATIONS_PATH}/interpolated']
+REGEX_ACTIVATIONS = '^layer2$'  # Regex to get only the big sequential layers inside the resnets. We were not able to get the whole activations due to computational/memory power limit
 
 ### CrossCoder Model Config
-BATCH_SIZE_CROSS = 2 # crosscoder batch -- number of datapoints fetched by the crosscoder dataloader
+BATCH_SIZE_CROSS = 4 # crosscoder batch -- number of datapoints fetched by the crosscoder dataloader
 NUM_EPOCHS_CROSS = 10
 LATENT_DIM = 224
 TRAINING_SIZE_CROSS   = 0.7
-VALIDATION_SIZE_CROSS = 0.1 # smaller validation because we only have to tune the latent_dim hyperparam
+VALIDATION_SIZE_CROSS = 0.1 # smaller validation because we just have to tune the latent_dim hyperparam
 TEST_SIZE_CROSS       = 0.2
-LR_CROSS = 5e-5
-LAMBDA_SPARSE = 2
-ADAM_BETA_1 = 0.9
-ADAM_BETA_2 = 0.999
+LR_CROSS = 0.001
+LAMBDA_SPARSE = 1/7 # TODO boh
 
 if __name__ == '__main__':
     seed_run() # We seed the run to replicate the results
@@ -227,28 +227,30 @@ if __name__ == '__main__':
 
         create_crosscoder_dataset(pokemon_dataset, dice_dataset, small_imagenet_dataset, RESNET_BATCH_SIZE,\
                                 pkmn_net, dice_net, interpolated_net,
-                                MODEL_ACTIVATIONS_PATHS, N_CROSSCODER_DATAPOINTS)
+                                MODEL_ACTIVATIONS_PATHS, N_CROSSCODER_DATAPOINTS, REGEX_ACTIVATIONS)
         
     crosscoder_dataset = CrossCoderDataset(ACTIVATIONS_PATH)
     n_activations = crosscoder_dataset.get_n_activations() # [n_models, n_crosscoder_datapoints, n_activations]
     cross_train_loader, cross_val_loader, cross_test_loader = get_dataloaders(crosscoder_dataset, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS)
     
     # TODO validation on latent dim
-    crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    crosscoder.to(device)
+    if TRAIN_CROSSCODER:
+        crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        crosscoder.to(device)
 
-    param_size = 0
-    for param in crosscoder.parameters():
-        param_size += param.nelement() * param.element_size()
-    buffer_size = 0
-    for buffer in crosscoder.buffers():
-        buffer_size += buffer.nelement() * buffer.element_size()
+        param_size = 0
+        for param in crosscoder.parameters():
+            param_size += param.nelement() * param.element_size()
+        buffer_size = 0
+        for buffer in crosscoder.buffers():
+            buffer_size += buffer.nelement() * buffer.element_size()
 
-    size_all_mb = (param_size + buffer_size) / 1024**2
-    print('model size: {:.3f}MB'.format(size_all_mb))
-    train_crosscoder(crosscoder, cross_train_loader,
-                    NUM_EPOCHS_CROSS,
-                    LR_CROSS, ADAM_BETA_1, ADAM_BETA_2)
+        size_all_mb = (param_size + buffer_size) / 1024**2
+        print('model size: {:.3f}MB'.format(size_all_mb))
+
+        train_crosscoder(crosscoder, cross_train_loader,
+                        NUM_EPOCHS_CROSS,
+                        LR_CROSS)
         
     
