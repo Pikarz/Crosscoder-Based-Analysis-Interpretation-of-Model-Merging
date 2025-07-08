@@ -4,19 +4,23 @@ from torch import nn
 from torch.nn.utils import clip_grad_norm_
 import torch.nn.functional as F
 from tqdm import tqdm, trange
-from torch.optim.lr_scheduler import ExponentialLR
+from torch.optim.lr_scheduler import ExponentialLR, OneCycleLR
 import wandb
+import copy
 
 N_MODELS = 3
 
 class CrossCoder(nn.Module):
-  def __init__(self, latent_dim, n_activations, lambda_sparse):
+  def __init__(self, latent_dim, n_activations, lambda_sparse, total_steps):
     super().__init__()
 
     self.latent_dim = latent_dim
     self.n_activations = n_activations
     self.lambda_sparse = lambda_sparse
     self.n_models = N_MODELS        # 3 in our case
+
+    self.total_steps    = total_steps # number of batches
+    self.current_step   = 0
 
     self.W_enc = nn.Parameter( 
         torch.empty(self.n_models, self.n_activations, self.latent_dim)
@@ -71,12 +75,15 @@ class CrossCoder(nn.Module):
 
     return activations_reconstruct
   
-  def get_loss(self, activations, l1_coeff):
+  def get_loss(self, activations):
     activations_encoder = self.encode(activations)
-    print('[DEBUG] Activations encoded')
+
+    l1_coeff = self.get_l1_coeff()
+
+    # print('[DEBUG] Activations encoded')
     activations_encoder_relu = F.relu(activations_encoder)
     activations_reconstruct = self.decode(activations_encoder_relu) 
-    print('[DEBUG] Activations reconstructed')
+    # print('[DEBUG] Activations reconstructed')
 
     reconstruction_loss = (activations_reconstruct - activations).pow(2)
 
@@ -88,53 +95,56 @@ class CrossCoder(nn.Module):
     l1_loss = (activations_encoder_relu * total_decoder_norm[None, :]).sum(-1).mean(0)
 
     loss = l2_loss + l1_coeff * l1_loss
-    print(f'l2: {l2_loss}\tl1_loss: {l1_coeff * l1_loss}')
+    # print(f'\nl2: {l2_loss}\tl1_loss: {l1_coeff * l1_loss}\n')
 
     return loss
   
-
-def get_lambdas(total_steps):
-    def LR_lambda(step, total_steps=total_steps):
+  def get_lambdas(self):
+    def LR_lambda(step, total_steps=self.total_steps):
         if step < 0.8 * total_steps:
             return 1.0
         else:
             return 1.0 - (step - 0.8 * total_steps) / (0.2 * total_steps)
     return LR_lambda
 
-def get_l1_coeff(step_counter, total_steps, lambda_sparse):
+  def get_l1_coeff(self):
     # Linearly increases from 0 to cfg["l1_coeff"] over the first 0.05 * self.total_steps steps, then keeps it constant
-    if step_counter < 0.05 * total_steps:
-        return lambda_sparse * step_counter / (0.05 * total_steps)
+    if self.current_step < 0.05 * self.total_steps:
+        return self.lambda_sparse * self.current_step / (0.05 * self.total_steps)
     else:
-        return lambda_sparse
+        return self.lambda_sparse
 
-def train_crosscoder(crosscoder, train_loader,
-                     num_epochs, lr):
+  def train_cross(self, train_loader, num_epochs, lr):
     
     print('[DEBUG] Start Training')
    
     optimizer = torch.optim.Adam(
-        crosscoder.parameters(),
+        self.parameters(),
         lr=lr,
        # betas=(adam_beta_1, adam_beta_2),
     )
 
-    total_steps = len(train_loader)
-    lambdas = get_lambdas(total_steps)
+    lambdas = self.get_lambdas()
    
     # scheduler = torch.optim.lr_scheduler.LambdaLR(
     #     optimizer, lambdas
     # )
-    scheduler = ExponentialLR(optimizer, gamma=0.9)
+    scheduler = OneCycleLR(
+        optimizer,
+        max_lr=0.01,
+        steps_per_epoch=self.total_steps,
+        epochs=num_epochs
+    )
+   # scheduler = ExponentialLR(optimizer, gamma=0.9)
 
     ### TODO WANDB  STUFF ###
 
     train_losses = []
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    crosscoder.to(device)
+    self.to(device)
 
     # Training Phase
-    crosscoder.train()
+    self.train()
 
     # Training loop
     for epoch in trange(num_epochs, desc="Epochs"): # trange is a shortcut of tqdm(range(...))
@@ -142,20 +152,21 @@ def train_crosscoder(crosscoder, train_loader,
         total_batches = 0
 
         loop = tqdm(enumerate(train_loader), total=len(train_loader), desc="Training", leave=True)
+        old_enc = copy.deepcopy(self.W_enc)
+        old_dec = copy.deepcopy(self.W_dec)
+
         for batch_idx, data in loop:
-            print(f'batch: {batch_idx}')
             # Get data to cuda if possible 
             activations = data.to(device)
 
-            current_step = batch_idx + 1
-            l1_coeff = get_l1_coeff(current_step, total_steps, crosscoder.lambda_sparse)
+            self.current_step += 1
 
             # Forward pass + Compute loss
-            loss = crosscoder.get_loss(activations, l1_coeff)
+            loss = self.get_loss(activations)
 
             # Backward pass and optimization
             loss.backward()
-            clip_grad_norm_(crosscoder.parameters(), max_norm=1.0) # gradient norm is at most 1
+            clip_grad_norm_(self.parameters(), max_norm=1.0) # gradient norm is at most 1
 
             optimizer.step()
             scheduler.step()
@@ -168,9 +179,11 @@ def train_crosscoder(crosscoder, train_loader,
         # Calculate average loss for the training epoch
         avg_train_loss = running_loss/total_batches
         train_losses.append(avg_train_loss)
+        self.current_step = 0 # At each epoch, we reset the step
 
-
-        print(f'\nEpoch {epoch + 1}, Average Training Loss: {avg_train_loss:.4f}')
+        print(f'\nEpoch {epoch + 1}, Average Training Loss: {avg_train_loss:.4f}\n \
+                Encoders similarity: {torch.allclose(self.W_enc, old_enc)}\n\
+                Decoders similarity: {torch.allclose(self.W_dec, old_dec)}')
 
 
         # run.log({
@@ -183,6 +196,41 @@ def train_crosscoder(crosscoder, train_loader,
 
     # finally:
     #     wandb.finish()
+
+  def val_cross(self, val_loader):
+    print('[DEBUG] Start Validation')
+
+    ### TODO WANDB  STUFF ###
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    self.to(device)
+
+    running_loss = 0
+
+    # Evaluation Phase
+    self.eval()
+
+    loop = tqdm(enumerate(val_loader), total=len(val_loader), desc="Training", leave=True)
+    with torch.no_grad():
+        for batch_idx, data in loop:
+            # Get data to cuda if possible 
+            activations = data.to(device)
+
+            # Forward pass + Compute loss
+            loss = self.get_loss(activations)
+
+            running_loss += loss.item()
+
+        print(f'[DEBUG] Validation Loss: {running_loss}')
+
+        # run.log({
+        #     "epoch": epoch + 1,
+        #     "train/loss": avg_train_loss,
+        # })
+
+            
+        print('[OK] Finished CrossCoder Evaluation')
+
 
 
 

@@ -10,6 +10,7 @@
 
 # CrossCoder dataset
 /activations/
+/activations_layer4/
 
 # cache
 __pycache__/
