@@ -22,30 +22,39 @@ class CrossCoder(nn.Module):
     self.total_steps    = total_steps # number of batches
     self.current_step   = 0
 
-    self.W_enc = nn.Parameter( 
-        torch.empty(self.n_models, self.n_activations, self.latent_dim)
-    )
+    # self.W_enc = nn.Parameter( 
+    #     torch.empty(self.n_models, self.n_activations, self.latent_dim)
+    # )
 
-    self.W_dec = nn.Parameter(
-        torch.nn.init.kaiming_normal_( # normal initializes values close to zero
-            torch.empty(
-                self.latent_dim, self.n_models, self.n_activations
-            )
-        )
-    )
+    # self.W_dec = nn.Parameter(
+    #     torch.nn.init.kaiming_normal_( # normal initializes values close to zero
+    #         torch.empty(
+    #             self.latent_dim, self.n_models, self.n_activations
+    #         )
+    #     )
+    # )
 
-    # initialize w_enc to be the transpose of w_dec because we naturally
-    # want a decoder that is able to reverse encoder's transformation
-    self.W_enc.data = einops.rearrange(
-          self.W_dec.data.clone(),
-          "latent_dim n_models n_activations -> n_models n_activations latent_dim"
-      )
+    # # initialize w_enc to be the transpose of w_dec because we naturally
+    # # want a decoder that is able to reverse encoder's transformation
+    # self.W_enc.data = einops.rearrange(
+    #       self.W_dec.data.clone(),
+    #       "latent_dim n_models n_activations -> n_models n_activations latent_dim"
+    #   )
 
-    # biases
-    self.b_enc = nn.Parameter(torch.zeros(latent_dim))
-    self.b_dec = nn.Parameter(
-        torch.zeros((self.n_activations))
-    )
+    # # biases
+    # self.b_enc = nn.Parameter(torch.zeros(latent_dim))
+    # self.b_dec = nn.Parameter(
+    #     torch.zeros((self.n_models, self.n_activations))
+    # )
+    self.W_enc = nn.Parameter(torch.empty(self.n_models, n_activations, latent_dim))
+    nn.init.kaiming_normal_(self.W_enc, nonlinearity="relu")
+    self.W_dec = nn.Parameter(torch.empty(latent_dim, self.n_models, n_activations))
+    nn.init.kaiming_normal_(self.W_dec, nonlinearity="linear")
+
+    # positive encoder bias
+    self.b_enc = nn.Parameter(torch.ones(latent_dim)*0.1)
+    self.b_dec = nn.Parameter(torch.zeros(self.n_models, n_activations))
+
 
   def encode(self, activations):
     # activations: [crosscoder_batch, n_models, n_activations]
@@ -65,7 +74,7 @@ class CrossCoder(nn.Module):
          "crosscoder_batch latent_dim, latent_dim n_models n_activations -> \
          crosscoder_batch n_models n_activations"
     )
-    return activations_dec + self.b_dec[None, None, :]
+    return activations_dec + self.b_dec
 
   def forward(self, activations):
     # activations:  [crosscoder_batch, n_models, n_activations]
@@ -76,27 +85,18 @@ class CrossCoder(nn.Module):
     return activations_reconstruct
   
   def get_loss(self, activations):
-    activations_encoder = self.encode(activations)
+    u = self.encode(activations)
+    z = F.relu(u)
+    recon = self.decode(z)
 
-    l1_coeff = self.get_l1_coeff()
+    l2_loss = (recon - activations).pow(2).mean()
 
-    # print('[DEBUG] Activations encoded')
-    activations_encoder_relu = F.relu(activations_encoder)
-    activations_reconstruct = self.decode(activations_encoder_relu) 
-    # print('[DEBUG] Activations reconstructed')
+    decoder_norms = self.W_dec.norm(dim=-1)
+    total_decoder_norm = decoder_norms.sum(dim=1)   # [latent_dim]
+    # sparsity on pre-act
+    l1_loss = (u.abs() * total_decoder_norm[None, :]).mean()
 
-    reconstruction_loss = (activations_reconstruct - activations).pow(2)
-
-    l2_per_batch = einops.reduce(reconstruction_loss, 'crosscoder_batch n_models n_activations -> crosscoder_batch', 'sum')
-    l2_loss = l2_per_batch.mean()
-
-    decoder_norms = self.W_dec.norm(dim=-1) # [latent_dim n_models]
-    total_decoder_norm = einops.reduce(decoder_norms, 'latent_dim n_models -> latent_dim', 'sum') # the idea is that we want to maintain sparsity to reconstruct each dimension of the latent space
-    l1_loss = (activations_encoder_relu * total_decoder_norm[None, :]).sum(-1).mean(0)
- 
-    loss = l2_loss + l1_coeff * l1_loss
-
-    return loss
+    return l2_loss + self.get_l1_coeff()*l1_loss
   
   def get_lambdas(self):
     def LR_lambda(step, total_steps=self.total_steps):
