@@ -73,7 +73,7 @@ REGEX_ACTIVATIONS = '^layer4$'  # Regex to get only the big sequential layers in
 ### CrossCoder Model Config
 BATCH_SIZE_CROSS = 4 # crosscoder batch -- number of datapoints fetched by the crosscoder dataloader
 NUM_EPOCHS_CROSS = 10
-LATENT_DIM = 4
+LATENT_DIM = 64
 TRAINING_SIZE_CROSS   = 0.7
 VALIDATION_SIZE_CROSS = 0.1 # smaller validation because we just have to tune the latent_dim hyperparam
 TEST_SIZE_CROSS       = 0.2

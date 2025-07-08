@@ -27,7 +27,7 @@ class CrossCoder(nn.Module):
     )
 
     self.W_dec = nn.Parameter(
-        torch.nn.init.normal_( # normal initializes values close to zero
+        torch.nn.init.kaiming_normal_( # normal initializes values close to zero
             torch.empty(
                 self.latent_dim, self.n_models, self.n_activations
             )
@@ -44,7 +44,7 @@ class CrossCoder(nn.Module):
     # biases
     self.b_enc = nn.Parameter(torch.zeros(latent_dim))
     self.b_dec = nn.Parameter(
-        torch.zeros((self.n_models, self.n_activations))
+        torch.zeros((self.n_activations))
     )
 
   def encode(self, activations):
@@ -65,7 +65,7 @@ class CrossCoder(nn.Module):
          "crosscoder_batch latent_dim, latent_dim n_models n_activations -> \
          crosscoder_batch n_models n_activations"
     )
-    return activations_dec + self.b_dec
+    return activations_dec + self.b_dec[None, None, :]
 
   def forward(self, activations):
     # activations:  [crosscoder_batch, n_models, n_activations]
@@ -93,9 +93,8 @@ class CrossCoder(nn.Module):
     decoder_norms = self.W_dec.norm(dim=-1) # [latent_dim n_models]
     total_decoder_norm = einops.reduce(decoder_norms, 'latent_dim n_models -> latent_dim', 'sum') # the idea is that we want to maintain sparsity to reconstruct each dimension of the latent space
     l1_loss = (activations_encoder_relu * total_decoder_norm[None, :]).sum(-1).mean(0)
-
+ 
     loss = l2_loss + l1_coeff * l1_loss
-    # print(f'\nl2: {l2_loss}\tl1_loss: {l1_coeff * l1_loss}\n')
 
     return loss
   
@@ -135,6 +134,7 @@ class CrossCoder(nn.Module):
         steps_per_epoch=self.total_steps,
         epochs=num_epochs
     )
+
    # scheduler = ExponentialLR(optimizer, gamma=0.9)
 
     ### TODO WANDB  STUFF ###
@@ -166,7 +166,6 @@ class CrossCoder(nn.Module):
 
             # Backward pass and optimization
             loss.backward()
-            clip_grad_norm_(self.parameters(), max_norm=1.0) # gradient norm is at most 1
 
             optimizer.step()
             scheduler.step()
@@ -180,10 +179,12 @@ class CrossCoder(nn.Module):
         avg_train_loss = running_loss/total_batches
         train_losses.append(avg_train_loss)
         self.current_step = 0 # At each epoch, we reset the step
+        delta = (self.W_enc - old_enc).abs().max().item()
+        delta_dec = (self.W_dec - old_dec).abs().max().item()
 
         print(f'\nEpoch {epoch + 1}, Average Training Loss: {avg_train_loss:.4f}\n \
-                Encoders similarity: {torch.allclose(self.W_enc, old_enc)}\n\
-                Decoders similarity: {torch.allclose(self.W_dec, old_dec)}')
+                Encoders similarity: {delta}\n\
+                Decoders similarity: {delta_dec}')
 
 
         # run.log({
