@@ -9,7 +9,7 @@ from resnet_model import finetune_resnet, load_resnet_from_weights, interpolate_
 from crosscoder_dataset_utils import create_crosscoder_dataset
 from CrossCoderDataset import CrossCoderDataset
 from CrossCoder import CrossCoder
-from analysis import norm_analysis
+from analysis import analyze_crosscoder
 
 #### CONFIG ####
 TRAIN                       = False # Do the actual trainining/interpolation or get the already-finetuned/interpolated versions
@@ -266,7 +266,7 @@ if __name__ == '__main__':
             crosscoder.val_cross(cross_val_loader)
 
         if TEST_CROSSCODER:
-           norm_analysis(crosscoder)
+           analyze_crosscoder(crosscoder)
 
         
     

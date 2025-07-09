@@ -1,97 +1,112 @@
 import torch
 import matplotlib.pyplot as plt
-import torch.nn.functional as F
+from typing import List, Dict, Tuple
 
-def norm_analysis(crosscoder,
-                  model_names=('dice', 'interpolated', 'pokemon'),
-                  thr_shared=None,
-                  thr_excl=0.8):
+def analyze_crosscoder(
+    crosscoder,
+    datasets: List[torch.Tensor] = None,
+    shared_tol: float = 0.05,
+    exclusive_threshold: float = 0.90,
+    density_threshold: float = 1e-3,
+) -> Dict[str, object]:
     """
-    Analyze shared and model-exclusive features for a multi-model crosscoder.
-
-    Args:
-        crosscoder: An object with attribute W_dec of shape [latent_dim, num_models, feature_dim].
-        model_names: Tuple of names for each model in the order of W_dec's second dimension.
-        thr_shared: Optional tuple (low, high) for relative-norm threshold to select shared features.
-                    If None, defaults to around uniform share ±0.1.
-        thr_excl: Relative-norm threshold above which a feature is considered exclusive to a model.
-    Returns:
-        A dict with keys:
-          - norms: Tensor of shape [latent_dim, num_models] of decoder norms.
-          - rel_norms: Tensor of shape [latent_dim, num_models] of relative norms.
-          - shared_idx: 1D LongTensor of indices of shared features.
-          - exclusive_idx: Dict mapping each model name to a LongTensor of its exclusive feature indices.
+    As before, but now 'new' features ≡ those exclusive to INTERPOLATED (model 1).
     """
-    torch.set_grad_enabled(False)
-    W = crosscoder.W_dec  # [latent_dim, num_models, feature_dim]
-    latent_dim, num_models, feature_dim = W.shape
+    # 1) unpack & CPU
+    W_dec = crosscoder.W_dec.detach().cpu()      # [D, M, A]
+    W_enc = crosscoder.W_enc.detach().cpu()      # [M, A, D]
+    b_enc = crosscoder.b_enc.detach().cpu()      # [D]
+    D, M, _ = W_dec.shape
+    names = {0:"dice", 1:"interpolated", 2:"pokemon"}
 
-    # Compute L2 norms of decoder vectors for each latent and model
-    norms = W.norm(dim=-1)  # [latent_dim, num_models]
-    total = norms.sum(dim=1, keepdim=True)  # [latent_dim, 1]
-    rel_norms = norms / (total + 1e-10)
+    # 2) norms & rel‐norms
+    norms     = W_dec.norm(dim=2)                             # [D, M]
+    rel_norms = norms / (norms.sum(1,keepdim=True) + 1e-12)   # [D, M]
 
-    # Determine thresholds for shared features
-    if thr_shared is None:
-        mean_share = 1.0 / num_models
-        delta = 0.1
-        thr_low, thr_high = mean_share - delta, mean_share + delta
-    else:
-        thr_low, thr_high = thr_shared
-    thr_excl_small = (1.0 - thr_excl) / (num_models - 1)
+    # 3) shared & exclusive
+    shared_mask   = (rel_norms - 1.0/M).abs().max(dim=1).values < shared_tol
+    shared_idx    = torch.where(shared_mask)[0]
+    exclusive_idx = {
+        m: torch.where(rel_norms[:,m] > exclusive_threshold)[0]
+        for m in range(M)
+    }
+    # ← change here: new = interpolated (model 1)
+    new_idx = exclusive_idx[1]
 
-    # Identify shared features (all models have relative norm in [low, high])
-    shared_mask = ((rel_norms > thr_low) & (rel_norms < thr_high)).all(dim=1)
-    shared_idx = shared_mask.nonzero(as_tuple=True)[0]
+    # 4) pairwise rel & cos
+    pairs = [(0,1),(0,2),(1,2)]
+    pairwise_rel, pairwise_cos = {}, {}
+    for i,j in pairs:
+        # rel‐norm ratio
+        pairwise_rel[(i,j)] = (
+            (rel_norms[:,i] / (rel_norms[:,i] + rel_norms[:,j] + 1e-12))
+            .numpy()
+        )
+        # cos‐sim
+        pairwise_cos[(i,j)] = torch.nn.functional.cosine_similarity(
+            W_dec[:,i,:], W_dec[:,j,:], dim=1
+        ).numpy()
 
-    # Identify exclusive features for each model
-    exclusive_idx = {}
-    for m in range(num_models):
-        others = [k for k in range(num_models) if k != m]
-        mask = (rel_norms[:, m] > thr_excl)
-        for k in others:
-            mask &= (rel_norms[:, k] < thr_excl_small)
-        exclusive_idx[model_names[m]] = mask.nonzero(as_tuple=True)[0]
+    # 5) densities (optional)
+    densities = None
+    if datasets is not None:
+        densities = torch.zeros(D)
+        total = sum(ds.shape[0] for ds in datasets)
+        for m, X in enumerate(datasets):
+            f = torch.relu(X.cpu() @ W_enc[m] + b_enc)  # [N, D]
+            densities += (f > density_threshold).sum(0).float()
+        densities /= total
+        densities = densities.numpy()
 
-    # Plot distribution of relative norms
-    plt.figure(figsize=(8, 5))
-    bins = 50
-    for m, name in enumerate(model_names):
-        plt.hist(rel_norms[:, m].cpu().numpy(), bins=bins, alpha=0.5, label=name)
-    plt.xlabel('Relative Decoder Norm')
-    plt.ylabel('Count')
-    plt.title('Distribution of Relative Decoder Norms')
-    plt.legend()
+    # 6) 2×3 hist grid
+    fig, axes = plt.subplots(2,3, figsize=(18,10), constrained_layout=True)
+    for col,(i,j) in enumerate(pairs):
+        xi, xj = names[i], names[j]
+        # rel‐norm
+        ax = axes[0,col]
+        ax.hist(pairwise_rel[(i,j)], bins=100)
+        ax.set_yscale("log")
+        ax.set_xlabel(f"{xi}/({xi}+{xj})")
+        if col==0: ax.set_ylabel("Number of features")
+        ax.set_title(f"Rel-norm: {xi} vs {xj}")
+        # cos‐sim
+        ax = axes[1,col]
+        ax.hist(pairwise_cos[(i,j)], bins=100)
+        ax.set_yscale("log")
+        ax.set_xlabel("Cosine similarity")
+        if col==0: ax.set_ylabel("Number of features")
+        ax.set_title(f"Cos-sim: {xi} vs {xj}")
+
+    fig.suptitle("Pairwise Decoder-Vector Comparisons", fontsize=18)
     plt.show()
 
-    # Plot cosine similarity of shared decoders between each pair of models
-    for i in range(num_models):
-        for j in range(i + 1, num_models):
-            cos_sim = F.cosine_similarity(
-                W[shared_idx, i], W[shared_idx, j], dim=-1
-            )  # [n_shared]
-            plt.figure(figsize=(6, 4))
-            plt.hist(cos_sim.cpu().numpy(), bins=bins)
-            plt.title(f'Cosine Similarity: {model_names[i]} vs {model_names[j]} (Shared)')
-            plt.xlabel('Cosine Similarity')
-            plt.ylabel('Count')
-            plt.show()
+    # 7) density‐by‐category
+    if densities is not None:
+        plt.figure(figsize=(6,4))
+        plt.hist(densities[shared_idx],       bins=50, alpha=0.6, label="shared")
+        for m in range(M):
+            idx = exclusive_idx[m]
+            plt.hist(densities[idx], bins=50, alpha=0.6, label=f"exclusive {names[m]}")
+        plt.yscale("log")
+        plt.xlabel("Activation density")
+        plt.ylabel("Number of features")
+        plt.legend()
+        plt.title("Feature Activation Densities by Category")
+        plt.show()
 
-    # Optionally print counts
-    print(f"Shared features: {shared_idx.numel()}")
-    for name, idx in exclusive_idx.items():
-        print(f"Exclusive to {name}: {idx.numel()}")
+    # 8) print lists
+    print(f"🔹 {len(shared_idx)} shared features: {shared_idx.tolist()}")
+    for m in range(M):
+        idx = exclusive_idx[m]
+        print(f"🔸 {len(idx)} exclusive to {names[m]}: {idx.tolist()}")
+    print(f"✨ {len(new_idx)} “new” features (exclusive to interpolated): {new_idx.tolist()}")
 
     return {
-        'norms': norms,
-        'rel_norms': rel_norms,
-        'shared_idx': shared_idx,
-        'exclusive_idx': exclusive_idx,
+        "shared_idx":      shared_idx,
+        "exclusive_idx":   exclusive_idx,
+        "new_idx":         new_idx,
+        "relative_norms":  rel_norms,
+        "pairwise_rel":    pairwise_rel,
+        "pairwise_cos":    pairwise_cos,
+        "densities":       densities,
     }
-
-
-# Example usage:
-# result = norm_analysis(crosscoder)
-# shared = result['shared_idx']
-# exclusive = result['exclusive_idx']
-# print("Done analysis.")
