@@ -1,6 +1,7 @@
 # model output folders
 /dice_resnet/
 /pokemon_resnet/
+/crosscoder/
 
 # interpolation outputs
 /interpolated/

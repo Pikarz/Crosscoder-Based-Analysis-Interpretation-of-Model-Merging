@@ -46,6 +46,7 @@ class CrossCoder(nn.Module):
     # self.b_dec = nn.Parameter(
     #     torch.zeros((self.n_models, self.n_activations))
     # )
+
     self.W_enc = nn.Parameter(torch.empty(self.n_models, n_activations, latent_dim))
     nn.init.kaiming_normal_(self.W_enc, nonlinearity="relu")
     self.W_dec = nn.Parameter(torch.empty(latent_dim, self.n_models, n_activations))
@@ -119,7 +120,6 @@ class CrossCoder(nn.Module):
    
     optimizer = torch.optim.Adam(
         self.parameters(),
-        lr=lr,
        # betas=(adam_beta_1, adam_beta_2),
     )
 
@@ -130,7 +130,7 @@ class CrossCoder(nn.Module):
     # )
     scheduler = OneCycleLR(
         optimizer,
-        max_lr=0.01,
+        max_lr=lr,
         steps_per_epoch=self.total_steps,
         epochs=num_epochs
     )
@@ -155,7 +155,7 @@ class CrossCoder(nn.Module):
         old_enc = copy.deepcopy(self.W_enc)
         old_dec = copy.deepcopy(self.W_dec)
 
-        for batch_idx, data in loop:
+        for _, data in loop:
             # Get data to cuda if possible 
             activations = data.to(device)
 
@@ -182,10 +182,7 @@ class CrossCoder(nn.Module):
         delta = (self.W_enc - old_enc).abs().max().item()
         delta_dec = (self.W_dec - old_dec).abs().max().item()
 
-        print(f'\nEpoch {epoch + 1}, Average Training Loss: {avg_train_loss:.4f}\n \
-                Encoders similarity: {delta}\n\
-                Decoders similarity: {delta_dec}')
-
+        print(f'\nEpoch {epoch + 1}, Average Training Loss: {avg_train_loss:.4f}')
 
         # run.log({
         #     "epoch": epoch + 1,
@@ -211,9 +208,9 @@ class CrossCoder(nn.Module):
     # Evaluation Phase
     self.eval()
 
-    loop = tqdm(enumerate(val_loader), total=len(val_loader), desc="Training", leave=True)
+    loop = tqdm(enumerate(val_loader), total=len(val_loader), desc="Validation", leave=True)
     with torch.no_grad():
-        for batch_idx, data in loop:
+        for _, data in loop:
             # Get data to cuda if possible 
             activations = data.to(device)
 
@@ -228,12 +225,8 @@ class CrossCoder(nn.Module):
         #     "epoch": epoch + 1,
         #     "train/loss": avg_train_loss,
         # })
-
             
         print('[OK] Finished CrossCoder Evaluation')
-
-
-
 
 
   

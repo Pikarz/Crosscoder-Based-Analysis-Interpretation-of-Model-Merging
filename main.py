@@ -9,13 +9,16 @@ from resnet_model import finetune_resnet, load_resnet_from_weights, interpolate_
 from crosscoder_dataset_utils import create_crosscoder_dataset
 from CrossCoderDataset import CrossCoderDataset
 from CrossCoder import CrossCoder
+from analysis import norm_analysis
 
 #### CONFIG ####
 TRAIN                       = False # Do the actual trainining/interpolation or get the already-finetuned/interpolated versions
 TEST                        = False # Test models or skip tests
 CREATE_CROSSCODER_DATASET   = False # Create the dataset or use the already-created one
-TRAIN_CROSSCODER            = True  # Train or use the already-trained crosscoder
-VAL_CROSSCODER              = True  # Crosscoder validation
+TRAIN_CROSSCODER            = False # Train or use the already-trained crosscoder
+VAL_CROSSCODER              = False # Crosscoder validation
+TEST_CROSSCODER             = True
+
 PROJECT_NAME                = 'deep_learning'
 
 # Same across all the fine-tuned models
@@ -73,12 +76,13 @@ REGEX_ACTIVATIONS = '^layer4$'  # Regex to get only the big sequential layers in
 ### CrossCoder Model Config
 BATCH_SIZE_CROSS = 4 # crosscoder batch -- number of datapoints fetched by the crosscoder dataloader
 NUM_EPOCHS_CROSS = 10
-LATENT_DIM = 64
+LATENT_DIM = 512
 TRAINING_SIZE_CROSS   = 0.7
 VALIDATION_SIZE_CROSS = 0.1 # smaller validation because we just have to tune the latent_dim hyperparam
 TEST_SIZE_CROSS       = 0.2
-LR_CROSS = 0.01
+LR_CROSS = 0.01   # max_lr in OneCycleLR
 LAMBDA_SPARSE = 2 # TODO boh
+CROSS_WEIGHTS_PATH = './crosscoder/model_weights.pth'
 
 if __name__ == '__main__':
     seed_run() # We seed the run to replicate the results
@@ -231,33 +235,38 @@ if __name__ == '__main__':
                                 pkmn_net, dice_net, interpolated_net,
                                 MODEL_ACTIVATIONS_PATHS, N_CROSSCODER_DATAPOINTS, REGEX_ACTIVATIONS)
         
-    crosscoder_dataset = CrossCoderDataset(ACTIVATIONS_PATH)
-    n_activations = crosscoder_dataset.get_n_activations() # [n_models, n_crosscoder_datapoints, n_activations]
+    crosscoder_dataset = CrossCoderDataset(ACTIVATIONS_PATH) # [n_models, n_crosscoder_datapoints, n_activations]
+    n_activations = crosscoder_dataset.get_n_activations() 
     cross_train_loader, cross_val_loader, cross_test_loader = get_dataloaders(crosscoder_dataset, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS)
     
-    # TODO validation on latent dim
+    total_steps = len(cross_train_loader) # total steps per epoch
     if TRAIN_CROSSCODER:
+        import os
+
         # print(f"n_activations: {n_activations}")
-        total_steps = len(cross_train_loader) # total steps per epoch
         crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         crosscoder.to(device)
 
-        # param_size = 0
-        # for param in crosscoder.parameters():
-        #     param_size += param.nelement() * param.element_size()
-        # buffer_size = 0
-        # for buffer in crosscoder.buffers():
-        #     buffer_size += buffer.nelement() * buffer.element_size()
-
-        # size_all_mb = (param_size + buffer_size) / 1024**2
-        # print('model size: {:.3f}MB'.format(size_all_mb))
-
         crosscoder.train_cross(cross_train_loader, NUM_EPOCHS_CROSS, LR_CROSS)
-    
-        #TODO save logic here and loading in val
 
-    if VAL_CROSSCODER:
-        crosscoder.val_cross(cross_val_loader)
+        dirpath = CROSS_WEIGHTS_PATH.split('/')[0]
+        if dirpath:
+            os.makedirs(dirpath, exist_ok=True)
+        # save the model’s state dict
+        torch.save(crosscoder.state_dict(), CROSS_WEIGHTS_PATH)
+
+
+    if VAL_CROSSCODER or TEST_CROSSCODER: 
+        crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps)
+        crosscoder = crosscoder.to(device)
+        crosscoder.load_state_dict(torch.load(CROSS_WEIGHTS_PATH, weights_only=True))
+
+        if VAL_CROSSCODER:
+            crosscoder.val_cross(cross_val_loader)
+
+        if TEST_CROSSCODER:
+           norm_analysis(crosscoder)
+
         
     
