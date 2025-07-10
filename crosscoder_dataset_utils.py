@@ -21,7 +21,7 @@ import re
 #     print(f'[OK] All activations have been saved')
     
 def create_crosscoder_dataset(  pokemon_dataset, dice_dataset, small_imagenet_dataset, batch_size,
-                                pkmn_net, dice_net, interpolated_net,
+                                models, 
                                 activations_output_path, crosscoder_datapoints, regex_activations, n_models=3):
 
     # equally distribute the data -- we have three subsets with an equal number of points
@@ -40,9 +40,6 @@ def create_crosscoder_dataset(  pokemon_dataset, dice_dataset, small_imagenet_da
 
     # Put dataloaders into a list
     dataloaders = [pkmn_dataloader, dice_dataloader, small_imagenet_dataloader]
-
-    # Put all models into a list
-    models = [ pkmn_net , dice_net, interpolated_net ] 
 
     print('[DEBUG] Starting saving models activations')
     for model, activation_path in zip(models, activations_output_path):

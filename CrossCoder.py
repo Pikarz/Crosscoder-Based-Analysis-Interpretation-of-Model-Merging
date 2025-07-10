@@ -47,16 +47,31 @@ class CrossCoder(nn.Module):
     #     torch.zeros((self.n_models, self.n_activations))
     # )
 
-    self.W_enc = nn.Parameter(torch.empty(self.n_models, n_activations, latent_dim))
-    nn.init.kaiming_normal_(self.W_enc, nonlinearity="relu")
-    self.W_dec = nn.Parameter(torch.empty(latent_dim, self.n_models, n_activations))
-    nn.init.kaiming_normal_(self.W_dec, nonlinearity="linear")
+
+    self.W_enc = nn.Parameter( 
+        torch.empty(self.n_models, self.n_activations, self.latent_dim)
+    )
+    
+    # Initialize a single decoder weight and repeat across all models
+    w_dec_base = torch.empty(latent_dim, n_activations)
+    nn.init.kaiming_normal_(w_dec_base, nonlinearity="linear")
+    self.W_dec = nn.Parameter(
+        w_dec_base
+            .unsqueeze(1)                   # shape: [latent_dim, 1, n_activations]
+            .repeat(1, self.n_models, 1)    # shape: [latent_dim, n_models, n_activations]
+    )
+
+    # initialize w_enc to be the transpose of w_dec because we naturally
+    # want a decoder that is able to reverse encoder's transformation
+    self.W_enc.data = einops.rearrange(
+          self.W_dec.data.clone(),
+          "latent_dim n_models n_activations -> n_models n_activations latent_dim"
+      )
 
     # positive encoder bias
-    self.b_enc = nn.Parameter(torch.ones(latent_dim)*0.1)
-    self.b_dec = nn.Parameter(torch.zeros(self.n_models, n_activations))
-
-
+    self.b_enc = nn.Parameter(torch.ones(latent_dim))
+    self.b_dec = nn.Parameter(torch.ones(self.n_models, n_activations))
+    
   def encode(self, activations):
     # activations: [crosscoder_batch, n_models, n_activations]
     activations_enc = einops.einsum(

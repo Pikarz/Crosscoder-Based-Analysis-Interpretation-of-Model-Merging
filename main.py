@@ -15,9 +15,10 @@ from analysis import analyze_crosscoder
 TRAIN                       = False # Do the actual trainining/interpolation or get the already-finetuned/interpolated versions
 TEST                        = False # Test models or skip tests
 CREATE_CROSSCODER_DATASET   = False # Create the dataset or use the already-created one
-TRAIN_CROSSCODER            = False # Train or use the already-trained crosscoder
-VAL_CROSSCODER              = False # Crosscoder validation
-TEST_CROSSCODER             = True
+TRAIN_CROSSCODER            = True # Train or use the already-trained crosscoder
+VAL_CROSSCODER              = True # Crosscoder validation
+TEST_CROSSCODER             = True # Test/analysis crosscoder
+COMPARE_WITH_DEFAULT_RESNET = False
 
 PROJECT_NAME                = 'deep_learning'
 
@@ -74,9 +75,9 @@ MODEL_ACTIVATIONS_PATHS = [f'{ACTIVATIONS_PATH}/pokemon', f'{ACTIVATIONS_PATH}/d
 REGEX_ACTIVATIONS = '^layer4$'  # Regex to get only the big sequential layers inside the resnets. We were not able to get the whole activations due to computational/memory power limit
 
 ### CrossCoder Model Config
-BATCH_SIZE_CROSS = 4 # crosscoder batch -- number of datapoints fetched by the crosscoder dataloader
-NUM_EPOCHS_CROSS = 10
-LATENT_DIM = 512
+BATCH_SIZE_CROSS = 64 # crosscoder batch -- number of datapoints fetched by the crosscoder dataloader
+NUM_EPOCHS_CROSS = 150
+LATENT_DIM = 900
 TRAINING_SIZE_CROSS   = 0.7
 VALIDATION_SIZE_CROSS = 0.1 # smaller validation because we just have to tune the latent_dim hyperparam
 TEST_SIZE_CROSS       = 0.2
@@ -84,13 +85,19 @@ LR_CROSS = 0.01   # max_lr in OneCycleLR
 LAMBDA_SPARSE = 2 # TODO boh
 CROSS_WEIGHTS_PATH = './crosscoder/model_weights.pth'
 
+### CROSSCODER SECOND PHASE -- Comparison with default resnet
+CROSS_WEIGHTS_RESNET_PATH = './crosscoder_base_resnet/model_weights.pth'
+RESNET_ACTIVATIONS_PATH = f'{ACTIVATIONS_PATH}/default_resnet'
+ACTIVATIONS_PATH_DEF_RESNET = './activations_layer4_def_resnet'
+
+
 if __name__ == '__main__':
     seed_run() # We seed the run to replicate the results
 
     device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tags    = ['resnet', 'classification']
 
-    if (TRAIN or TEST or CREATE_CROSSCODER_DATASET): # If we just care about the crosscoder model part, then we skip everything
+    if (TRAIN or TEST or CREATE_CROSSCODER_DATASET or COMPARE_WITH_DEFAULT_RESNET): # If we don't care about the dice/pokemon datasets, we just skip
         ##### Pokemon Finetuning ####
         ### Prepare data
         print('[DEBUG] Loading Pokemon Dataset')
@@ -232,7 +239,7 @@ if __name__ == '__main__':
         small_imagenet_dataset = get_small_imagenet_dataset()
 
         create_crosscoder_dataset(pokemon_dataset, dice_dataset, small_imagenet_dataset, RESNET_BATCH_SIZE,\
-                                pkmn_net, dice_net, interpolated_net,
+                                [pkmn_net, dice_net, interpolated_net],
                                 MODEL_ACTIVATIONS_PATHS, N_CROSSCODER_DATAPOINTS, REGEX_ACTIVATIONS)
         
     crosscoder_dataset = CrossCoderDataset(ACTIVATIONS_PATH) # [n_models, n_crosscoder_datapoints, n_activations]
@@ -242,7 +249,6 @@ if __name__ == '__main__':
     total_steps = len(cross_train_loader) # total steps per epoch
     if TRAIN_CROSSCODER:
         import os
-
         # print(f"n_activations: {n_activations}")
         crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -266,7 +272,39 @@ if __name__ == '__main__':
             crosscoder.val_cross(cross_val_loader)
 
         if TEST_CROSSCODER:
-           analyze_crosscoder(crosscoder)
+           analyze_crosscoder(crosscoder, cross_test_loader)
 
+    if COMPARE_WITH_DEFAULT_RESNET: 
+        base_resnet = torchvision.models.resnet50('ResNet50_Weights.DEFAULT').to(device)
+
+        small_imagenet_dataset = get_small_imagenet_dataset()
+        # create_crosscoder_dataset(pokemon_dataset, dice_dataset, small_imagenet_dataset, RESNET_BATCH_SIZE,\
+        #                         [base_resnet],
+        #                         [RESNET_ACTIVATIONS_PATH], N_CROSSCODER_DATAPOINTS, REGEX_ACTIVATIONS)
         
-    
+        crosscoder_dataset_resnet = CrossCoderDataset(ACTIVATIONS_PATH_DEF_RESNET) # [n_models, n_crosscoder_datapoints, n_activations]
+        n_activations = crosscoder_dataset_resnet.get_n_activations() 
+        cross_train_loader, cross_val_loader, cross_test_loader = get_dataloaders(crosscoder_dataset_resnet, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS)
+        
+        total_steps = len(cross_train_loader) # total steps per epoch
+        import os
+        # print(f"n_activations: {n_activations}")
+        crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        crosscoder.to(device)
+
+        crosscoder.train_cross(cross_train_loader, NUM_EPOCHS_CROSS, LR_CROSS)
+
+        dirpath = CROSS_WEIGHTS_RESNET_PATH.split('/')[0]
+        if dirpath:
+            os.makedirs(dirpath, exist_ok=True)
+        # save the model’s state dict
+        torch.save(crosscoder.state_dict(), CROSS_WEIGHTS_RESNET_PATH)
+
+        crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps)
+        crosscoder = crosscoder.to(device)
+        crosscoder.load_state_dict(torch.load(CROSS_WEIGHTS_PATH, weights_only=True))
+
+        crosscoder.val_cross(cross_val_loader)
+
+        analyze_crosscoder(crosscoder, cross_test_loader)
