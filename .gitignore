@@ -3,9 +3,11 @@
 /pokemon_resnet/
 /crosscoder/
 /crosscoder_base_resnet/
+/pcb_resnet/
 
 # interpolation outputs
 /interpolated/
+
 
 # WandB logs
 /wandb/

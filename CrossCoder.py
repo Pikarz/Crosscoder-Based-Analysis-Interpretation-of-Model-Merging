@@ -22,43 +22,16 @@ class CrossCoder(nn.Module):
     self.total_steps    = total_steps # number of batches
     self.current_step   = 0
 
-    # self.W_enc = nn.Parameter( 
-    #     torch.empty(self.n_models, self.n_activations, self.latent_dim)
-    # )
-
-    # self.W_dec = nn.Parameter(
-    #     torch.nn.init.kaiming_normal_( # normal initializes values close to zero
-    #         torch.empty(
-    #             self.latent_dim, self.n_models, self.n_activations
-    #         )
-    #     )
-    # )
-
-    # # initialize w_enc to be the transpose of w_dec because we naturally
-    # # want a decoder that is able to reverse encoder's transformation
-    # self.W_enc.data = einops.rearrange(
-    #       self.W_dec.data.clone(),
-    #       "latent_dim n_models n_activations -> n_models n_activations latent_dim"
-    #   )
-
-    # # biases
-    # self.b_enc = nn.Parameter(torch.zeros(latent_dim))
-    # self.b_dec = nn.Parameter(
-    #     torch.zeros((self.n_models, self.n_activations))
-    # )
-
-
     self.W_enc = nn.Parameter( 
         torch.empty(self.n_models, self.n_activations, self.latent_dim)
     )
-    
-    # Initialize a single decoder weight and repeat across all models
-    w_dec_base = torch.empty(latent_dim, n_activations)
-    nn.init.kaiming_normal_(w_dec_base, nonlinearity="linear")
+
     self.W_dec = nn.Parameter(
-        w_dec_base
-            .unsqueeze(1)                   # shape: [latent_dim, 1, n_activations]
-            .repeat(1, self.n_models, 1)    # shape: [latent_dim, n_models, n_activations]
+        torch.nn.init.kaiming_normal_( # normal initializes values close to zero
+            torch.empty(
+                self.latent_dim, self.n_models, self.n_activations
+            )
+        )
     )
 
     # initialize w_enc to be the transpose of w_dec because we naturally
@@ -68,7 +41,33 @@ class CrossCoder(nn.Module):
           "latent_dim n_models n_activations -> n_models n_activations latent_dim"
       )
 
-    # positive encoder bias
+    # biases
+    # self.b_enc = nn.Parameter(torch.zeros(latent_dim))
+    # self.b_dec = nn.Parameter(
+    #     torch.zeros((self.n_models, self.n_activations))
+    # )
+
+
+    # self.W_enc = nn.Parameter( 
+    #     torch.empty(self.n_models, self.n_activations, self.latent_dim)
+    # )
+    
+    # # Initialize a single decoder weight and repeat across all models
+    # w_dec_base = torch.empty(latent_dim, n_activations)
+    # nn.init.kaiming_normal_(w_dec_base, nonlinearity="linear")
+    # self.W_dec = nn.Parameter(
+    #     w_dec_base
+    #         .unsqueeze(1)                   # shape: [latent_dim, 1, n_activations]
+    #         .repeat(1, self.n_models, 1)    # shape: [latent_dim, n_models, n_activations]
+    # )
+
+    # # initialize w_enc to be the transpose of w_dec because we naturally
+    # # want a decoder that is able to reverse encoder's transformation
+    # self.W_enc.data = einops.rearrange(
+    #       self.W_dec.data.clone(),
+    #       "latent_dim n_models n_activations -> n_models n_activations latent_dim"
+    #   )
+
     self.b_enc = nn.Parameter(torch.ones(latent_dim))
     self.b_dec = nn.Parameter(torch.ones(self.n_models, n_activations))
     

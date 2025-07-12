@@ -10,15 +10,20 @@ from crosscoder_dataset_utils import create_crosscoder_dataset
 from CrossCoderDataset import CrossCoderDataset
 from CrossCoder import CrossCoder
 from analysis import analyze_crosscoder
+from pcb_merge import create_pcb_merge, pcb_grid_search
 
 #### CONFIG ####
 TRAIN                       = False # Do the actual trainining/interpolation or get the already-finetuned/interpolated versions
 TEST                        = False # Test models or skip tests
 CREATE_CROSSCODER_DATASET   = False # Create the dataset or use the already-created one
-TRAIN_CROSSCODER            = True # Train or use the already-trained crosscoder
-VAL_CROSSCODER              = True # Crosscoder validation
-TEST_CROSSCODER             = True # Test/analysis crosscoder
-COMPARE_WITH_DEFAULT_RESNET = False
+TRAIN_CROSSCODER            = False # Train or use the already-trained crosscoder
+VAL_CROSSCODER              = False # Crosscoder validation
+TEST_CROSSCODER             = False # Test/analysis crosscoder
+### 
+CREATE_PCB_MERGE            = True # Creation of new merged model using Parameter Competition Balancing for Model Merging (https://arxiv.org/pdf/2410.02396)
+PCB_GRID_SEARCH             = True # Grid search on pcb_ratio
+TEST_PCB                    = True # Test the new merged model on the two original datasets
+CREATE_PCB_DATASET          = True # Creates the activations for the PCB merging technique
 
 PROJECT_NAME                = 'deep_learning'
 
@@ -85,10 +90,9 @@ LR_CROSS = 0.01   # max_lr in OneCycleLR
 LAMBDA_SPARSE = 2 # TODO boh
 CROSS_WEIGHTS_PATH = './crosscoder/model_weights.pth'
 
-### CROSSCODER SECOND PHASE -- Comparison with default resnet
-CROSS_WEIGHTS_RESNET_PATH = './crosscoder_base_resnet/model_weights.pth'
-RESNET_ACTIVATIONS_PATH = f'{ACTIVATIONS_PATH}/default_resnet'
-ACTIVATIONS_PATH_DEF_RESNET = './activations_layer4_def_resnet'
+### Second experiment -- using a different merging technique: Parameter Competition Balancing for Model Merging (https://arxiv.org/pdf/2410.02396)
+PCB_WEIGHTS_PATH   ='./pcb_resnet/'
+
 
 
 if __name__ == '__main__':
@@ -97,7 +101,7 @@ if __name__ == '__main__':
     device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tags    = ['resnet', 'classification']
 
-    if (TRAIN or TEST or CREATE_CROSSCODER_DATASET or COMPARE_WITH_DEFAULT_RESNET): # If we don't care about the dice/pokemon datasets, we just skip
+    if (TRAIN or TEST or CREATE_CROSSCODER_DATASET or TEST_PCB): # If we don't care about the dice/pokemon datasets, we just skip
         ##### Pokemon Finetuning ####
         ### Prepare data
         print('[DEBUG] Loading Pokemon Dataset')
@@ -262,7 +266,8 @@ if __name__ == '__main__':
         # save the model’s state dict
         torch.save(crosscoder.state_dict(), CROSS_WEIGHTS_PATH)
 
-
+    # Validate and Test Crosscoder
+    # The test is done through an analysis that shows relevant plots
     if VAL_CROSSCODER or TEST_CROSSCODER: 
         crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps)
         crosscoder = crosscoder.to(device)
@@ -274,37 +279,12 @@ if __name__ == '__main__':
         if TEST_CROSSCODER:
            analyze_crosscoder(crosscoder, cross_test_loader)
 
-    if COMPARE_WITH_DEFAULT_RESNET: 
-        base_resnet = torchvision.models.resnet50('ResNet50_Weights.DEFAULT').to(device)
+    if CREATE_PCB_MERGE:
+        if PCB_GRID_SEARCH:
+            pcb_grid_search(PKMN_WEIGHTS_PATH, DICE_WEIGHTS_PATH, PCB_WEIGHTS_PATH, PKMN_HEAD, DICE_HEAD, PKMN_NUM_CLASSES, DICE_NUM_CLASSES, pkmn_val_loader, dice_val_loader)
 
-        small_imagenet_dataset = get_small_imagenet_dataset()
-        # create_crosscoder_dataset(pokemon_dataset, dice_dataset, small_imagenet_dataset, RESNET_BATCH_SIZE,\
-        #                         [base_resnet],
-        #                         [RESNET_ACTIVATIONS_PATH], N_CROSSCODER_DATAPOINTS, REGEX_ACTIVATIONS)
+    if CREATE_PCB_DATASET:
+        pass
         
-        crosscoder_dataset_resnet = CrossCoderDataset(ACTIVATIONS_PATH_DEF_RESNET) # [n_models, n_crosscoder_datapoints, n_activations]
-        n_activations = crosscoder_dataset_resnet.get_n_activations() 
-        cross_train_loader, cross_val_loader, cross_test_loader = get_dataloaders(crosscoder_dataset_resnet, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS)
-        
-        total_steps = len(cross_train_loader) # total steps per epoch
-        import os
-        # print(f"n_activations: {n_activations}")
-        crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps)
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        crosscoder.to(device)
-
-        crosscoder.train_cross(cross_train_loader, NUM_EPOCHS_CROSS, LR_CROSS)
-
-        dirpath = CROSS_WEIGHTS_RESNET_PATH.split('/')[0]
-        if dirpath:
-            os.makedirs(dirpath, exist_ok=True)
-        # save the model’s state dict
-        torch.save(crosscoder.state_dict(), CROSS_WEIGHTS_RESNET_PATH)
-
-        crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps)
-        crosscoder = crosscoder.to(device)
-        crosscoder.load_state_dict(torch.load(CROSS_WEIGHTS_PATH, weights_only=True))
-
-        crosscoder.val_cross(cross_val_loader)
-
-        analyze_crosscoder(crosscoder, cross_test_loader)
+    if TEST_PCB:
+        best_pcb_ratio = 0.7138571739196777 # from grid search -- average acc 0.9391 on pokemon/dice
