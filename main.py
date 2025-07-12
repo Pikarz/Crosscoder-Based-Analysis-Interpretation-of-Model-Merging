@@ -114,7 +114,7 @@ if __name__ == '__main__':
     device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tags    = ['resnet', 'classification']
 
-    if (TRAIN or TEST or CREATE_CROSSCODER_DATASET or COMPARE_WITH_DEFAULT_RESNET): # If we don't care about the dice/pokemon datasets, we just skip
+    if (TRAIN or TEST or CREATE_CROSSCODER_DATASET): # If we don't care about the dice/pokemon datasets, we just skip
         ##### Pokemon Finetuning ####
         ### Prepare data
         print('[DEBUG] Loading Pokemon Dataset')
