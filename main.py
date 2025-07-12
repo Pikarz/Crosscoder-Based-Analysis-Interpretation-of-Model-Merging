@@ -5,20 +5,26 @@ from torch import nn, optim
 from get_datasets import get_small_imagenet_dataset
 from get_dataloaders import get_dataloaders
 from utils import seed_run
-from resnet_model import finetune_resnet, load_resnet_from_weights, interpolate_resnet_models, test_resnet
+from resnet_model import finetune_resnet, load_resnet_from_weights, interpolate_resnet_models, test_resnet, averaging_resnet_models
 from crosscoder_dataset_utils import create_crosscoder_dataset
 from CrossCoderDataset import CrossCoderDataset
 from CrossCoder import CrossCoder
 from analysis import analyze_crosscoder
+import os
 
 #### CONFIG ####
-TRAIN                       = False # Do the actual trainining/interpolation or get the already-finetuned/interpolated versions
-TEST                        = False # Test models or skip tests
-CREATE_CROSSCODER_DATASET   = False # Create the dataset or use the already-created one
-TRAIN_CROSSCODER            = True # Train or use the already-trained crosscoder
-VAL_CROSSCODER              = True # Crosscoder validation
-TEST_CROSSCODER             = True # Test/analysis crosscoder
-COMPARE_WITH_DEFAULT_RESNET = False
+TRAIN                       = False     # Do the actual training/merging or get the already-finetuned/merged versions
+TEST                        = True      # Test models or skip tests
+CREATE_CROSSCODER_DATASET   = False     # Create the dataset or use the already-created one
+TRAIN_CROSSCODER            = True     # Train or use the already-trained crosscoder
+VAL_CROSSCODER              = True     # Crosscoder validation
+TEST_CROSSCODER             = True     # Test/analysis crosscoder
+
+MERGE_WITH_INTERPOLATION    = False     # Wheter we merge models with interpolation technique
+MERGE_WITH_PARAM_AVG        = True      # Wheter we merge models with parameter averaging technique
+
+# List of all the merge flags configured, is used to assert that only one merged model can be loaded at a time when training the crosscoder
+MERGE_CONFIG_LIST           = [MERGE_WITH_INTERPOLATION, MERGE_WITH_PARAM_AVG]
 
 PROJECT_NAME                = 'deep_learning'
 
@@ -61,18 +67,30 @@ DICE_WANDB_CONFIG   = {
 }
 
 # Interpolation Config
-OUT_INTERPOLATED_DIR    = './interpolated'
-DEFAULT_RESNET_HEAD     = 'model_weights_v3.pth'
-PKMN_HEAD               = 'model_weights_v3_pkmn.pth'
-DICE_HEAD               = 'model_weights_v3_dice.pth'
+OUT_INTERPOLATED_DIR                 = './interpolated'
+DEFAULT_INTERPOLATED_RESNET_HEAD     = 'model_weights_v3.pth'
+PKMN_INTERPOLATED_HEAD               = 'model_weights_v3_pkmn.pth'
+DICE_INTERPOLATED_HEAD               = 'model_weights_v3_dice.pth'
+
+# Parameter Averaging Config
+OUT_PARAM_AVERAGE_DIR           = './parameter_avg'
+DEFAULT_AVG_RESNET_HEAD         = 'parameter_avg_weights.pth'
+PKMN_AVG_HEAD                   = 'parameter_avg_pkmn.pth'
+DICE_AVG_HEAD                   = 'parameter_avg_weights_dice.pth'
 
 #### CrossCoder Dataset Config
 RESNET_BATCH_SIZE = 1 # number of images given to our resnets to compute a single set of activations
 # Number of datapoints generated per model (dimension [n_models, n_crosscoder_datapoints, n_activations]) -- we do not take everything because otherwise we would have terabytes of data
 N_CROSSCODER_DATAPOINTS = 500
-ACTIVATIONS_PATH = './activations_layer4'
-MODEL_ACTIVATIONS_PATHS = [f'{ACTIVATIONS_PATH}/pokemon', f'{ACTIVATIONS_PATH}/dice', f'{ACTIVATIONS_PATH}/interpolated']
 REGEX_ACTIVATIONS = '^layer4$'  # Regex to get only the big sequential layers inside the resnets. We were not able to get the whole activations due to computational/memory power limit
+
+# Crosscoder dataset with Interpolation merging technique
+ACTIVATIONS_INTERPOLATED_PATH = './interpolated_activations_layer4'
+MODEL_ACTIVATIONS_INTERPOLATED_PATHS = [f'{ACTIVATIONS_INTERPOLATED_PATH}/pokemon', f'{ACTIVATIONS_INTERPOLATED_PATH}/dice', f'{ACTIVATIONS_INTERPOLATED_PATH}/interpolated']
+
+# Crosscoder dataset with Parameter Averaging merging technique
+ACTIVATIONS_PARAM_AVG_PATH = './parameter_avg_activations_layer4'
+MODEL_ACTIVATIONS_PARAM_AVG_PATHS = [f'{ACTIVATIONS_PARAM_AVG_PATH}/pokemon', f'{ACTIVATIONS_PARAM_AVG_PATH}/dice', f'{ACTIVATIONS_PARAM_AVG_PATH}/interpolated']
 
 ### CrossCoder Model Config
 BATCH_SIZE_CROSS = 64 # crosscoder batch -- number of datapoints fetched by the crosscoder dataloader
@@ -83,15 +101,14 @@ VALIDATION_SIZE_CROSS = 0.1 # smaller validation because we just have to tune th
 TEST_SIZE_CROSS       = 0.2
 LR_CROSS = 0.01   # max_lr in OneCycleLR
 LAMBDA_SPARSE = 2 # TODO boh
-CROSS_WEIGHTS_PATH = './crosscoder/model_weights.pth'
 
-### CROSSCODER SECOND PHASE -- Comparison with default resnet
-CROSS_WEIGHTS_RESNET_PATH = './crosscoder_base_resnet/model_weights.pth'
-RESNET_ACTIVATIONS_PATH = f'{ACTIVATIONS_PATH}/default_resnet'
-ACTIVATIONS_PATH_DEF_RESNET = './activations_layer4_def_resnet'
+CROSS_INTERPOLATED_WEIGHTS_PATH = './crosscoder/interpolated/model_weights.pth'
+CROSS_PARAM_AVG_WEIGHTS_PATH = './crosscoder/parameter_avg/model_weights.pth'
 
 
 if __name__ == '__main__':
+    assert any(MERGE_CONFIG_LIST), f"ERROR: at least one merging technique must be true, see MERGE_CONFIG_LIST -> {MERGE_CONFIG_LIST}"
+    
     seed_run() # We seed the run to replicate the results
 
     device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -203,108 +220,171 @@ if __name__ == '__main__':
             print(f"[RESULT] The original Resnet tested with an accuracy equal to {resnet_pkmn_accuracy:.4f} on the Dice Dataset")
         ##### End of default Resnet Tests #####
 
-        ##### Pokemon-Dice Interpolation and Tests #####
+        ##### Pokemon-Dice Merging and Tests #####
 
+        
         if TRAIN:
-            print('[DEBUG] Starting Interpolation')
-            interpolate_resnet_models(PKMN_WEIGHTS_PATH, DICE_WEIGHTS_PATH,
-                            OUT_INTERPOLATED_DIR, DEFAULT_RESNET_HEAD,
-                            PKMN_HEAD, DICE_HEAD,
-                            interpolation_weight=0.5
-                            )
+            
+            if MERGE_WITH_INTERPOLATION:
+                print('[DEBUG] Starting Interpolation')
+                interpolate_resnet_models(
+                    PKMN_WEIGHTS_PATH, DICE_WEIGHTS_PATH,
+                    OUT_INTERPOLATED_DIR, DEFAULT_INTERPOLATED_RESNET_HEAD,
+                    PKMN_INTERPOLATED_HEAD, DICE_INTERPOLATED_HEAD,
+                    interpolation_weight=0.5
+                )
+                
+            if MERGE_WITH_PARAM_AVG:
+                print('[DEBUG] Starting parameter averaging')
+                averaging_resnet_models(
+                    PKMN_WEIGHTS_PATH,
+                    DICE_WEIGHTS_PATH,
+                    OUT_PARAM_AVERAGE_DIR,
+                    out_head1_name=PKMN_AVG_HEAD,
+                    out_head2_name=DICE_AVG_HEAD,
+                    out_name=DEFAULT_AVG_RESNET_HEAD
+                )
+
+            
         
         ### Test Interpolated Models on Original Datasets
-        pkmn_interpolated_model_path = OUT_INTERPOLATED_DIR+'/'+PKMN_HEAD
-        pkmn_interpolated = load_resnet_from_weights(pkmn_interpolated_model_path, PKMN_NUM_CLASSES)
-
-        dice_interpolated_model_path = OUT_INTERPOLATED_DIR+'/'+DICE_HEAD
-        dice_interpolated = load_resnet_from_weights(dice_interpolated_model_path, DICE_NUM_CLASSES)
 
         if TEST:
-            # Test on pkmn dataset
-            interpolated_pkmn_accuracy_on_pkmn = test_resnet(pkmn_interpolated, pkmn_test_loader)
-            print(f"[RESULT] Interpolated Resnet tested with an accuracy equal to {interpolated_pkmn_accuracy_on_pkmn:.4f} on the Pokemon Dataset")
-            # test on dice dataset
-            interpolated_pkmn_accuracy_on_dice = test_resnet(dice_interpolated, dice_test_loader)
-            print(f"[RESULT] Interpolated Resnet tested with an accuracy equal to {interpolated_pkmn_accuracy_on_dice:.4f} on the Dice Dataset")
+            
+            if MERGE_WITH_INTERPOLATION:
+                # Load interpolated models
+                pkmn_interpolated_model_path = OUT_INTERPOLATED_DIR+'/'+PKMN_INTERPOLATED_HEAD
+                pkmn_interpolated = load_resnet_from_weights(pkmn_interpolated_model_path, PKMN_NUM_CLASSES)
 
-        ##### End Pokemon-Dice Interpolation and Tests #####
+                dice_interpolated_model_path = OUT_INTERPOLATED_DIR+'/'+DICE_INTERPOLATED_HEAD
+                dice_interpolated = load_resnet_from_weights(dice_interpolated_model_path, DICE_NUM_CLASSES)
+                
+                # Test on pkmn dataset
+                interpolated_pkmn_accuracy_on_pkmn = test_resnet(pkmn_interpolated, pkmn_test_loader)
+                print(f"[RESULT INTERPOLATED] Interpolated Resnet tested with an accuracy equal to {interpolated_pkmn_accuracy_on_pkmn:.4f} on the Pokemon Dataset")
+                # Test on dice dataset
+                interpolated_dice_accuracy_on_dice = test_resnet(dice_interpolated, dice_test_loader)
+                print(f"[RESULT INTERPOLATED] Interpolated Resnet tested with an accuracy equal to {interpolated_dice_accuracy_on_dice:.4f} on the Dice Dataset")
+            
+            
+            if MERGE_WITH_PARAM_AVG:
+                # Load parameter average models
+                pkmn_avg_model_path = os.path.join(OUT_PARAM_AVERAGE_DIR, PKMN_AVG_HEAD)
+                dice_avg_model_path = os.path.join(OUT_PARAM_AVERAGE_DIR, DICE_AVG_HEAD)
+
+                pkmn_avg = load_resnet_from_weights(pkmn_avg_model_path, PKMN_NUM_CLASSES)
+                dice_avg = load_resnet_from_weights(dice_avg_model_path, DICE_NUM_CLASSES)
+                
+                # Test on pkmn dataset
+                acc_pkmn_on_pkmn = test_resnet(pkmn_avg, pkmn_test_loader)
+                print(f"[RESULT AVG] Parameter Avg Resnet tested on Pokémon: {acc_pkmn_on_pkmn:.4f}")
+
+                # Test on dice dataset
+                acc_dice_on_dice = test_resnet(dice_avg, dice_test_loader)
+                print(f"[RESULT AVG] Parameter Avg Resnet tested on Dice: {acc_dice_on_dice:.4f}")
+
+        ##### End Pokemon-Dice Merging and Tests #####
 
     ##### Crosscoder Dataset Creation #####
     if CREATE_CROSSCODER_DATASET:
-        interpolated_model_path = OUT_INTERPOLATED_DIR+'/'+DEFAULT_RESNET_HEAD
-        interpolated_net = load_resnet_from_weights(interpolated_model_path)
-
         # The small imagenet_dataset contains a small subset of the original imagenet, which should activate the "old" features, learned during the original training
         small_imagenet_dataset = get_small_imagenet_dataset()
-
-        create_crosscoder_dataset(pokemon_dataset, dice_dataset, small_imagenet_dataset, RESNET_BATCH_SIZE,\
-                                [pkmn_net, dice_net, interpolated_net],
-                                MODEL_ACTIVATIONS_PATHS, N_CROSSCODER_DATAPOINTS, REGEX_ACTIVATIONS)
         
-    crosscoder_dataset = CrossCoderDataset(ACTIVATIONS_PATH) # [n_models, n_crosscoder_datapoints, n_activations]
-    n_activations = crosscoder_dataset.get_n_activations() 
-    cross_train_loader, cross_val_loader, cross_test_loader = get_dataloaders(crosscoder_dataset, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS)
+        if MERGE_WITH_INTERPOLATION:
+            interpolated_model_path = OUT_INTERPOLATED_DIR+'/'+DEFAULT_INTERPOLATED_RESNET_HEAD
+            interpolated_net = load_resnet_from_weights(interpolated_model_path)
+            
+            create_crosscoder_dataset(pokemon_dataset, dice_dataset, small_imagenet_dataset, RESNET_BATCH_SIZE,\
+                        [pkmn_net, dice_net, interpolated_net],
+                        MODEL_ACTIVATIONS_INTERPOLATED_PATHS, N_CROSSCODER_DATAPOINTS, REGEX_ACTIVATIONS)
+        if MERGE_WITH_PARAM_AVG:
+            parameter_avg_model_path = OUT_PARAM_AVERAGE_DIR+'/'+DEFAULT_AVG_RESNET_HEAD
+            parameter_avg_net = load_resnet_from_weights(parameter_avg_model_path)
+            
+            create_crosscoder_dataset(pokemon_dataset, dice_dataset, small_imagenet_dataset, RESNET_BATCH_SIZE,\
+                        [pkmn_net, dice_net, parameter_avg_net],
+                        MODEL_ACTIVATIONS_PARAM_AVG_PATHS, N_CROSSCODER_DATAPOINTS, REGEX_ACTIVATIONS)
     
-    total_steps = len(cross_train_loader) # total steps per epoch
+    # Initialize variables for future use
+    cross_interpolated_train_loader, cross_interpolated_val_loader, cross_interpolated_test_loader = None, None, None
+    cross_param_avg_train_loader, cross_param_avg_val_loader, cross_param_avg_test_loader = None, None, None
+    
+    cross_interpolated_weights_path = None
+    cross_param_avg_weights_path = None
+    
+    total_steps_interpolated    = None
+    total_steps_param_avg       = None
+    
+    # Load crosscoder dataset
+    if MERGE_WITH_INTERPOLATION:
+        crosscoder_dataset = CrossCoderDataset(ACTIVATIONS_INTERPOLATED_PATH) # [n_models, n_crosscoder_datapoints, n_activations]
+        n_activations = crosscoder_dataset.get_n_activations() 
+        cross_interpolated_train_loader, cross_interpolated_val_loader, cross_interpolated_test_loader = get_dataloaders(crosscoder_dataset, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS)
+        
+        # Load crosscoder weights
+        cross_interpolated_weights_path = CROSS_INTERPOLATED_WEIGHTS_PATH
+        total_steps_interpolated = len(cross_interpolated_train_loader) # total steps per epoch
+    
+    if MERGE_WITH_PARAM_AVG:
+        crosscoder_dataset = CrossCoderDataset(ACTIVATIONS_PARAM_AVG_PATH) # [n_models, n_crosscoder_datapoints, n_activations]
+        n_activations = crosscoder_dataset.get_n_activations() 
+        cross_param_avg_train_loader, cross_param_avg_val_loader, cross_param_avg_test_loader = get_dataloaders(crosscoder_dataset, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS)
+        
+        # Load crosscoder weights
+        cross_param_avg_weights_path = CROSS_PARAM_AVG_WEIGHTS_PATH
+        total_steps_param_avg = len(cross_param_avg_train_loader)
+    
     if TRAIN_CROSSCODER:
-        import os
         # print(f"n_activations: {n_activations}")
-        crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps)
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        crosscoder.to(device)
+        if MERGE_WITH_INTERPOLATION:
+            crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps_interpolated)
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            crosscoder.to(device)
 
-        crosscoder.train_cross(cross_train_loader, NUM_EPOCHS_CROSS, LR_CROSS)
+            crosscoder.train_cross(cross_interpolated_train_loader, NUM_EPOCHS_CROSS, LR_CROSS)
 
-        dirpath = CROSS_WEIGHTS_PATH.split('/')[0]
-        if dirpath:
-            os.makedirs(dirpath, exist_ok=True)
-        # save the model’s state dict
-        torch.save(crosscoder.state_dict(), CROSS_WEIGHTS_PATH)
+            dirpath = os.path.dirname(cross_interpolated_weights_path)
+            
+            if dirpath:
+                os.makedirs(dirpath, exist_ok=True)
+            # save the model’s state dict
+            torch.save(crosscoder.state_dict(), cross_interpolated_weights_path)
+            
+        if MERGE_WITH_PARAM_AVG:
+            crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps_param_avg)
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            crosscoder.to(device)
 
+            crosscoder.train_cross(cross_param_avg_train_loader, NUM_EPOCHS_CROSS, LR_CROSS)
 
-    if VAL_CROSSCODER or TEST_CROSSCODER: 
-        crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps)
-        crosscoder = crosscoder.to(device)
-        crosscoder.load_state_dict(torch.load(CROSS_WEIGHTS_PATH, weights_only=True))
+            dirpath = os.path.dirname(cross_param_avg_weights_path)
+            
+            if dirpath:
+                os.makedirs(dirpath, exist_ok=True)
+            # save the model’s state dict
+            torch.save(crosscoder.state_dict(), cross_param_avg_weights_path)
 
-        if VAL_CROSSCODER:
-            crosscoder.val_cross(cross_val_loader)
-
-        if TEST_CROSSCODER:
-           analyze_crosscoder(crosscoder, cross_test_loader)
-
-    if COMPARE_WITH_DEFAULT_RESNET: 
-        base_resnet = torchvision.models.resnet50('ResNet50_Weights.DEFAULT').to(device)
-
-        small_imagenet_dataset = get_small_imagenet_dataset()
-        # create_crosscoder_dataset(pokemon_dataset, dice_dataset, small_imagenet_dataset, RESNET_BATCH_SIZE,\
-        #                         [base_resnet],
-        #                         [RESNET_ACTIVATIONS_PATH], N_CROSSCODER_DATAPOINTS, REGEX_ACTIVATIONS)
+    
+    if VAL_CROSSCODER or TEST_CROSSCODER:
         
-        crosscoder_dataset_resnet = CrossCoderDataset(ACTIVATIONS_PATH_DEF_RESNET) # [n_models, n_crosscoder_datapoints, n_activations]
-        n_activations = crosscoder_dataset_resnet.get_n_activations() 
-        cross_train_loader, cross_val_loader, cross_test_loader = get_dataloaders(crosscoder_dataset_resnet, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS)
-        
-        total_steps = len(cross_train_loader) # total steps per epoch
-        import os
-        # print(f"n_activations: {n_activations}")
-        crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps)
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        crosscoder.to(device)
+        if MERGE_WITH_INTERPOLATION:
+            crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps_interpolated)
+            crosscoder = crosscoder.to(device)
+            crosscoder.load_state_dict(torch.load(cross_interpolated_weights_path, weights_only=True))
 
-        crosscoder.train_cross(cross_train_loader, NUM_EPOCHS_CROSS, LR_CROSS)
+            if VAL_CROSSCODER:
+                crosscoder.val_cross(cross_interpolated_val_loader)
 
-        dirpath = CROSS_WEIGHTS_RESNET_PATH.split('/')[0]
-        if dirpath:
-            os.makedirs(dirpath, exist_ok=True)
-        # save the model’s state dict
-        torch.save(crosscoder.state_dict(), CROSS_WEIGHTS_RESNET_PATH)
+            if TEST_CROSSCODER:
+                analyze_crosscoder(crosscoder, cross_interpolated_test_loader)
+                
+        if MERGE_WITH_PARAM_AVG:
+            crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps_param_avg)
+            crosscoder = crosscoder.to(device)
+            crosscoder.load_state_dict(torch.load(cross_param_avg_weights_path, weights_only=True))
 
-        crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps)
-        crosscoder = crosscoder.to(device)
-        crosscoder.load_state_dict(torch.load(CROSS_WEIGHTS_PATH, weights_only=True))
+            if VAL_CROSSCODER:
+                crosscoder.val_cross(cross_param_avg_val_loader)
 
-        crosscoder.val_cross(cross_val_loader)
-
-        analyze_crosscoder(crosscoder, cross_test_loader)
+            if TEST_CROSSCODER:
+                analyze_crosscoder(crosscoder, cross_param_avg_test_loader)
