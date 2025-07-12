@@ -129,7 +129,7 @@ class CrossCoder(nn.Module):
 
   def train_cross(self, train_loader, num_epochs, lr, experiment_name, wandb_config, 
                   description,
-                  project_name='deep_learning',
+                  project_name,
                   tags=['resnet', 'classification'],):
     
     print('[DEBUG] Start Training')

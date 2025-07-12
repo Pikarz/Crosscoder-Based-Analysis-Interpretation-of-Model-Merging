@@ -179,6 +179,7 @@ def finetune_resnet(net, train_loader, val_loader,
         print(f"[OK] Weights saved in {weights_path}")
 
     finally:
+        run.unwatch()
         wandb.finish()
 
     return train_losses, train_accuracies, val_losses, val_accuracies

@@ -106,23 +106,24 @@ if __name__ == '__main__':
     plot_dataset_examples(train_loader, number_classes, pokemon_dataset.std, pokemon_dataset.mean)
     
 def train_crosscoder_and_save_weights(
-  latent_dim, 
-  n_activations,
-  lambda_sparse,
-  total_steps,
-  train_loader,
-  num_epochs,
-  training_lr,
-  crosscoder_weights_path,
-  experiment_name,
-  wandb_config,
-  description
+    latent_dim, 
+    n_activations,
+    lambda_sparse,
+    total_steps,
+    train_loader,
+    num_epochs,
+    training_lr,
+    crosscoder_weights_path,
+    experiment_name,
+    wandb_config,
+    project_name,
+    description
   ):
-    crosscoder = CrossCoder(latent_dim, n_activations, lambda_sparse, total_steps)
+    crosscoder = CrossCoder.CrossCoder(latent_dim, n_activations, lambda_sparse, total_steps)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     crosscoder.to(device)
 
-    crosscoder.train_cross(train_loader, num_epochs, training_lr, experiment_name, wandb_config, description)
+    crosscoder.train_cross(train_loader, num_epochs, training_lr, experiment_name, wandb_config, project_name, description)
 
     dirpath = os.path.dirname(crosscoder_weights_path)
     
@@ -131,25 +132,18 @@ def train_crosscoder_and_save_weights(
     # save the model’s state dict
     torch.save(crosscoder.state_dict(), crosscoder_weights_path)
     
-def validate_and_test_crosscoder(
-  val_crosscoder,
-  test_crosscoder,
+def validate_crosscoder(
   latent_dim,
   n_activations,
   lambda_sparse,
   total_steps,
   crosscoder_weights_path,
   crosscoder_val_loader,
-  crosscoder_test_loader,
   ):
   device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
   
-  crosscoder = CrossCoder(latent_dim, n_activations, lambda_sparse, total_steps)
+  crosscoder = CrossCoder.CrossCoder(latent_dim, n_activations, lambda_sparse, total_steps)
   crosscoder = crosscoder.to(device)
   crosscoder.load_state_dict(torch.load(crosscoder_weights_path, weights_only=True))
 
-  if val_crosscoder:
-      crosscoder.val_cross(crosscoder_val_loader)
-
-  if test_crosscoder:
-      analyze_crosscoder(crosscoder, crosscoder_test_loader)
+  crosscoder.val_cross(crosscoder_val_loader)

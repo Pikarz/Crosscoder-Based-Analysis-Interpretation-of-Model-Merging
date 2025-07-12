@@ -5,7 +5,8 @@ from utils import get_equally_distributed_subset
 from tqdm import tqdm
 import os
 import re
-import CrossCoderDataset
+
+from resnet_model import load_resnet_from_weights
 
 # def save_models_activations(models, dataloaders, activations_paths):
 #   # Create directories to store the activations
@@ -26,13 +27,13 @@ def create_crosscoder_dataset(  pokemon_dataset, dice_dataset, small_imagenet_da
                                 activations_output_path, crosscoder_datapoints, regex_activations, n_models=3):
 
     # equally distribute the data -- we have three subsets with an equal number of points
-    print('[DEBUG] Preparing equally distributed subsets')
+    #print('[DEBUG] Preparing equally distributed subsets')
     pkmn_subset, dice_subset, small_imagenet_subset = get_equally_distributed_subset(pokemon_dataset, dice_dataset, small_imagenet_dataset, n_models, crosscoder_datapoints)
 
-    print(f'[DEBUG] Dataset Subsets Size:\n \
-              Pokemon: {len(pkmn_subset)}\n \
-              Dice: {len(dice_subset)}\n \
-              Small Imagenet: {len(small_imagenet_subset)}')
+    # print(f'[DEBUG] Dataset Subsets Size:\n \
+    #           Pokemon: {len(pkmn_subset)}\n \
+    #           Dice: {len(dice_subset)}\n \
+    #           Small Imagenet: {len(small_imagenet_subset)}')
     
     # Get corresponding dataloaders
     pkmn_dataloader, _, _           = get_dataloaders(pkmn_subset,           batch_size, 1.0, 0.0, 0.0) # It's already a subset so we just get the whole dataloader
@@ -101,3 +102,31 @@ def get_model_activations(path, activations_tensors=[], activations=torch.as_ten
     activations = torch.as_tensor([])
     
   return activations_tensors, activations
+
+def save_merge_activations(
+    enabled, name, model_dir, model_head, act_paths,\
+    datasets,           # (pokemon_dataset, dice_dataset, small_imagenet_dataset)
+    batch_size, n_points, regex, num_classes=None
+):
+    if not enabled: # skip if not enabled, otherwise compute the activations
+        return
+
+    print(f'[DEBUG] Saving {name} Activations')
+
+    model_path = os.path.join(model_dir, model_head)
+    # pass num_classes only when given
+    if num_classes is not None: # for pcb to get a particular head
+        net = load_resnet_from_weights(model_path, num_classes)
+    else:
+        net = load_resnet_from_weights(model_path)
+
+    create_crosscoder_dataset(
+        *datasets,
+        batch_size,
+        [net],
+        act_paths,
+        n_points,
+        regex
+    )
+
+
