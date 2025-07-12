@@ -8,13 +8,16 @@
 # interpolation outputs
 /interpolated/
 
+# averaging outputs
+/parameter_avg/
 
 # WandB logs
 /wandb/
 
 # CrossCoder dataset
 /activations/
-/activations_layer4/
+/interpolated_activations_layer4/
+/parameter_avg_activations_layer4/
 /activations_layer4_def_resnet/
 
 # cache
