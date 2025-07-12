@@ -112,7 +112,7 @@ TEST_SIZE_CROSS       = 0.2
 LR_CROSS = 0.01   # max_lr in OneCycleLR
 LAMBDA_SPARSE = 2 
 CROSS_WEIGHTS_PATH = './crosscoder/model_weights.pth'
-INTERPOLATED_CROSSCODER_WANDB_CONFIG   = {
+CROSSCODER_WANDB_CONFIG   = {
     "Lambda Sparse": LAMBDA_SPARSE,
     "lr": LR_CROSS,
     "latent_dim": LATENT_DIM,
@@ -422,20 +422,6 @@ if __name__ == '__main__':
         
         # 1) We train crosscoder with activations dataset from interpolation merge model
         if MERGE_WITH_INTERPOLATION:
-            crosscoder = CrossCoder(LATENT_DIM, n_activations, LAMBDA_SPARSE, total_steps_interpolated)
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            crosscoder.to(device)
-
-            crosscoder.train_cross(cross_train_loader, NUM_EPOCHS_CROSS, LR_CROSS, experiment_name='Interpolation_Cross', wandb_config=INTERPOLATED_CROSSCODER_WANDB_CONFIG, 
-                  description='Crosscoder -- Interpolated Merging')
-
-            dirpath = os.path.dirname(cross_interpolated_weights_path)
-            
-            if dirpath:
-                os.makedirs(dirpath, exist_ok=True)
-            # save the model’s state dict
-            torch.save(crosscoder.state_dict(), cross_interpolated_weights_path)
-            
             train_crosscoder_and_save_weights(
                 LATENT_DIM,
                 n_activations,
@@ -444,7 +430,10 @@ if __name__ == '__main__':
                 cross_interpolated_train_loader,
                 NUM_EPOCHS_CROSS,
                 LR_CROSS,
-                cross_interpolated_weights_path
+                cross_interpolated_weights_path,
+                experiment_name='Interpolation_Cross',
+                wandb_config=CROSSCODER_WANDB_CONFIG, 
+                description='Crosscoder -- Interpolated Merging'
                 )
         # 2) We train crosscoder with activations dataset from parameter averagin merge model
         if MERGE_WITH_PARAM_AVG:
@@ -456,7 +445,10 @@ if __name__ == '__main__':
                 cross_param_avg_train_loader,
                 NUM_EPOCHS_CROSS,
                 LR_CROSS,
-                cross_param_avg_weights_path
+                cross_param_avg_weights_path,
+                experiment_name='Parameter_Averaging_Cross',
+                wandb_config=CROSSCODER_WANDB_CONFIG, 
+                description='Crosscoder -- Parameter Averaging Merging'
             )
         # 3) We train crosscoder with activations dataset from PCB merge model
         if MERGE_WITH_PCB:
@@ -468,7 +460,10 @@ if __name__ == '__main__':
                 cross_pcb_train_loader,
                 NUM_EPOCHS_CROSS,
                 LR_CROSS,
-                cross_pcb_weights_path
+                cross_pcb_weights_path,
+                experiment_name='PCB_Cross',
+                wandb_config=CROSSCODER_WANDB_CONFIG, 
+                description='Crosscoder -- PCB Merging'
             )
 
     # Validate and/or Test Crosscoder

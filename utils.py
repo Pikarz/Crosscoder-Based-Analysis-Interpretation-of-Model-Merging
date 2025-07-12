@@ -113,13 +113,16 @@ def train_crosscoder_and_save_weights(
   train_loader,
   num_epochs,
   training_lr,
-  crosscoder_weights_path
+  crosscoder_weights_path,
+  experiment_name,
+  wandb_config,
+  description
   ):
     crosscoder = CrossCoder(latent_dim, n_activations, lambda_sparse, total_steps)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     crosscoder.to(device)
 
-    crosscoder.train_cross(train_loader, num_epochs, training_lr)
+    crosscoder.train_cross(train_loader, num_epochs, training_lr, experiment_name, wandb_config, description)
 
     dirpath = os.path.dirname(crosscoder_weights_path)
     
