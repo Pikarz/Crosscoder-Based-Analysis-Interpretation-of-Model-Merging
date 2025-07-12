@@ -23,12 +23,12 @@ TEST                        = False # Test models or skip tests
 CREATE_CROSSCODER_DATASET   = False # Create the dataset or use the already-created one
 TRAIN_CROSSCODER            = False # Train or use the already-trained crosscoder
 VAL_CROSSCODER              = False # Crosscoder validation
-TEST_CROSSCODER             = False # Test/analysis crosscoder
+TEST_CROSSCODER             = True # Test/analysis crosscoder
 ### 
-CREATE_PCB_MERGE            = True # Creation of new merged model using Parameter Competition Balancing for Model Merging (https://arxiv.org/pdf/2410.02396)
-PCB_GRID_SEARCH             = True # Grid search on pcb_ratio
-TEST_PCB                    = True # Test the new merged model on the two original datasets
-CREATE_PCB_DATASET          = True # Creates the activations for the PCB merging technique
+CREATE_PCB_MERGE            = False # Creation of new merged model using Parameter Competition Balancing for Model Merging (https://arxiv.org/pdf/2410.02396)
+PCB_GRID_SEARCH             = False # Grid search on pcb_ratio
+TEST_PCB                    = False # Test the new merged model on the two original datasets
+CREATE_PCB_DATASET          = False # Creates the activations for the PCB merging technique
 
 PROJECT_NAME                = 'deep_learning'
 
@@ -104,7 +104,15 @@ TRAINING_SIZE_CROSS   = 0.7
 VALIDATION_SIZE_CROSS = 0.1 # smaller validation because we just have to tune the latent_dim hyperparam
 TEST_SIZE_CROSS       = 0.2
 LR_CROSS = 0.01   # max_lr in OneCycleLR
-LAMBDA_SPARSE = 2 # TODO boh
+LAMBDA_SPARSE = 2 
+CROSS_WEIGHTS_PATH = './crosscoder/model_weights.pth'
+INTERPOLATED_CROSSCODER_WANDB_CONFIG   = {
+    "Lambda Sparse": LAMBDA_SPARSE,
+    "lr": LR_CROSS,
+    "latent_dim": LATENT_DIM,
+    "architecture": "CrossCoder",
+    "epochs": NUM_EPOCHS_CROSS
+}
 
 CROSS_INTERPOLATED_WEIGHTS_PATH = './crosscoder/interpolated/model_weights.pth'
 CROSS_PARAM_AVG_WEIGHTS_PATH = './crosscoder/parameter_avg/model_weights.pth'
@@ -118,7 +126,7 @@ if __name__ == '__main__':
     device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tags    = ['resnet', 'classification']
 
-    if (TRAIN or TEST or CREATE_CROSSCODER_DATASET or TEST_PCB): # If we don't care about the dice/pokemon datasets, we just skip
+    if (TRAIN or TEST or CREATE_CROSSCODER_DATASET or CREATE_PCB_MERGE): # If we don't care about the dice/pokemon datasets, we just skip
         ##### Pokemon Finetuning ####
         ### Prepare data
         print('[DEBUG] Loading Pokemon Dataset')
@@ -345,7 +353,8 @@ if __name__ == '__main__':
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             crosscoder.to(device)
 
-            crosscoder.train_cross(cross_interpolated_train_loader, NUM_EPOCHS_CROSS, LR_CROSS)
+            crosscoder.train_cross(cross_train_loader, NUM_EPOCHS_CROSS, LR_CROSS, experiment_name='Interpolation_Cross', wandb_config=INTERPOLATED_CROSSCODER_WANDB_CONFIG, 
+                  description='Crosscoder -- Interpolated Merging')
 
             dirpath = os.path.dirname(cross_interpolated_weights_path)
             
@@ -404,11 +413,15 @@ if __name__ == '__main__':
             crosscoder.val_cross(cross_val_loader)
 
         if TEST_CROSSCODER:
-           analyze_crosscoder(crosscoder, cross_test_loader)
+           analyze_crosscoder(crosscoder)
 
     if CREATE_PCB_MERGE:
         if PCB_GRID_SEARCH:
             pcb_grid_search(PKMN_WEIGHTS_PATH, DICE_WEIGHTS_PATH, PCB_WEIGHTS_PATH, PKMN_HEAD, DICE_HEAD, PKMN_NUM_CLASSES, DICE_NUM_CLASSES, pkmn_val_loader, dice_val_loader)
+        else:
+            best_pcb_ratio = 0.7138571739196777 # from grid search -- average acc 0.9391 on pokemon/dice
+
+       # create_pcb_merge(...)
 
     if CREATE_PCB_DATASET:
         pass
