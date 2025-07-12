@@ -5,6 +5,7 @@ from utils import get_equally_distributed_subset
 from tqdm import tqdm
 import os
 import re
+import CrossCoderDataset
 
 # def save_models_activations(models, dataloaders, activations_paths):
 #   # Create directories to store the activations

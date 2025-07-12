@@ -1,6 +1,7 @@
 import torch
 import torchvision
 import os
+import shutil
 
 from resnet_model import load_resnet_from_weights, test_resnet
 
@@ -77,44 +78,57 @@ def create_pcb_merge(path_A, path_B, pcb_out_dir, pcb_model_A_head, pcb_model_B_
     model.fc.bias   = torch.nn.Parameter(model_B['fc.bias'].clone())
     torch.save(model.state_dict(), os.path.join(pcb_out_dir, pcb_model_B_head))
 
-def pcb_grid_search(pkmn_weights_path, dice_weights_path, pcb_weights_path, pkmn_head, dice_head, pkmn_num_classes, dice_num_classes, pkmn_val_loader, dice_val_loader):
-        ### PCB Merging Hyperparams Grid Search ###
-    best_acc = 0
-    best_pcb_ratio  = None
-    best_min_ratio  = None
-    best_max_ratio  = None
-    
+def pcb_grid_search(
+    pkmn_weights_path, dice_weights_path, pcb_weights_path,
+    pkmn_head, dice_head, pkmn_num_classes, dice_num_classes,
+    pkmn_val_loader, dice_val_loader
+):
+    print("[DEBUG] Starting PCB Grid Search")
+    best_acc       = 0
+    best_pcb_ratio = None
+
+    # we'll write every candidate into a temp dir
+    temp_dir = pcb_weights_path + '.temp'
+    os.makedirs(temp_dir, exist_ok=True)
+
     for pcb_ratio in torch.linspace(0.5, 0.999, 50):
-        #for min_ratio in (0.0001, 0.01, 0.1):
-           # for max_ratio in (0.01, 0.1, 0.5, 0.7, 0.9):
-                    create_pcb_merge(pkmn_weights_path, dice_weights_path, pcb_weights_path, pkmn_head, dice_head, pcb_ratio=pcb_ratio) #, min_ratio=min_ratio, max_ratio=max_ratio)
+        create_pcb_merge(
+            pkmn_weights_path, dice_weights_path,
+            temp_dir,  # <-- temp here
+            pkmn_head, dice_head,
+            pcb_ratio=pcb_ratio
+        )
 
-                    pkmn_path = pcb_weights_path + '/' + pkmn_head
-                    pcb_resnet = load_resnet_from_weights(pkmn_path, pkmn_num_classes)
-                    pcb_resnet.eval()
+        pkmn_path = os.path.join(temp_dir, pkmn_head)
+        model = load_resnet_from_weights(pkmn_path, pkmn_num_classes).eval()
+        acc_a = test_resnet(model, pkmn_val_loader)
 
-                    pcb_pkmn_accuracy = test_resnet(pcb_resnet, pkmn_val_loader)
-                    # print(f"[RESULT] The PCB Resnet tested with an accuracy equal to {pcb_pkmn_accuracy:.4f} on the Pokemon Dataset")
+        dice_path = os.path.join(temp_dir, dice_head)
+        model = load_resnet_from_weights(dice_path, dice_num_classes).eval()
+        acc_b = test_resnet(model, dice_val_loader)
 
-                    dice_path = pcb_weights_path + '/' + dice_head
-                    pcb_resnet = load_resnet_from_weights(dice_path, dice_num_classes)
-                    pcb_resnet.eval()
+        avg_acc = (acc_a + acc_b) / 2
+        print(f"[RESULT] avg_acc={avg_acc:.4f} with pcb_ratio={pcb_ratio:.4f}")
 
-                    pcb_dice_accuracy = test_resnet(pcb_resnet, dice_val_loader)
-                    #print(f"[RESULT] The PCB Resnet tested with an accuracy equal to {pcb_dice_accuracy:.4f} on the Dice Dataset")   
+        if avg_acc > best_acc:
+            best_acc       = avg_acc
+            best_pcb_ratio = pcb_ratio
+            print("\t[RESULT] New best! Copying heads to final dir…")
 
-                    accuracy = (pcb_pkmn_accuracy + pcb_dice_accuracy)/2
-                    print(f"[RESULT] The PCB Resnet tested with an average accuracy equal to {accuracy:.4f} on the Pokemon and Dice Datasets with pcb_ratio={pcb_ratio}")#, min_ratio={min_ratio}, max_ratio={max_ratio}")
-                    if accuracy > best_acc:
-                        best_acc = accuracy
-                        best_pcb_ratio  = pcb_ratio
-                       # best_min_ratio  = min_ratio
-                       # best_max_ratio  = max_ratio
-                        print(f"\t [RESULT] New Best Result!")
-                    
-    print(f"[RESULT] The best PCB Resnet tested with an average accuracy equal to {best_acc:.4f} on the Pokemon and Dice Datasets with pcb_ratio={best_pcb_ratio}") #, min_ratio={best_min_ratio}, max_ratio={best_max_ratio}")
+            # ensure final dir exists
+            os.makedirs(pcb_weights_path, exist_ok=True)
 
-    import torch
+            for fname in (pkmn_head, dice_head):
+                dst = os.path.join(pcb_weights_path, fname)
+                if os.path.exists(dst):
+                    os.remove(dst)
+
+            for fname in (pkmn_head, dice_head):
+                src = os.path.join(temp_dir, fname)
+                dst = os.path.join(pcb_weights_path, fname)
+                shutil.copy(src, dst)
+
+    print(f"[DONE] Best avg_acc={best_acc:.4f} @ pcb_ratio={best_pcb_ratio:.4f}")
 
 
 ### From Github: https://github.com/duguodong7/pcb-merging
