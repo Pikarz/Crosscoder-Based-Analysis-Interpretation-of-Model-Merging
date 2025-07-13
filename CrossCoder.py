@@ -214,13 +214,13 @@ class CrossCoder(nn.Module):
     torch.save(self.state_dict(), weights_path)
 
     # Log artifact
-    artifact = wandb.Artifact(
-        name=f"{experiment_name}_model",
-        type="model",
-        description=f"Trained CrossCoder model - final average loss: {train_losses[-1]:.4f}"
-    )
-    artifact.add_file(weights_path)
-    run.log_artifact(artifact)
+    # artifact = wandb.Artifact(
+    #     name=f"{experiment_name}_model",
+    #     type="model",
+    #     description=f"Trained CrossCoder model - final average loss: {train_losses[-1]:.4f}"
+    # )
+    # artifact.add_file(weights_path)
+    # run.log_artifact(artifact)
 
     wandb.finish()
     print('[OK] Finished CrossCoder Training')

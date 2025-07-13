@@ -1,7 +1,6 @@
 # model output folders
 /models/
 
-
 # WandB logs
 /wandb/
 

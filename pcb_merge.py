@@ -53,12 +53,13 @@ def create_pcb_merge(path_A, path_B, pcb_out_dir, pcb_model_A_head, pcb_model_B_
     model.load_state_dict(new_sd)
     model.eval()
 
+    os.makedirs(pcb_out_dir, exist_ok=True)
+    
     # --- save A‐head ---
     num_classes_A, _ = model_A['fc.weight'].shape
     model.fc = torch.nn.Linear(model.fc.in_features, num_classes_A)
     model.fc.weight = torch.nn.Parameter(model_A['fc.weight'].clone())
     model.fc.bias   = torch.nn.Parameter(model_A['fc.bias'].clone())
-    os.makedirs(pcb_out_dir, exist_ok=True)
     torch.save(model.state_dict(), os.path.join(pcb_out_dir, pcb_model_A_head))
 
     # --- now restore BN running stats from model_B for the B‐head save ---
@@ -94,7 +95,7 @@ def pcb_grid_search(
     for pcb_ratio in torch.linspace(0.5, 0.999, 50):
         create_pcb_merge(
             pkmn_weights_path, dice_weights_path,
-            temp_dir,  # <-- temp here
+            temp_dir,  
             pkmn_head, dice_head,
             pcb_ratio=pcb_ratio
         )
@@ -161,7 +162,7 @@ def PCB_merge(flat_task_checks, pcb_ratio=0.1, min_ratio=0.0001, max_ratio=0.000
     n, d = all_checks.shape   
 
     # all_checks_abs = clamp(torch.abs(all_checks), min_ratio=min_ratio, max_ratio=max_ratio) # original code, flattened too much the signals
-    all_checks_abs = torch.abs(all_checks) # -- one working solution
+    all_checks_abs = torch.abs(all_checks) # -- one working solution, this means that even very extreme feature are significant in our context
 
     clamped_all_checks = torch.sign(all_checks)*all_checks_abs
     self_pcb = normalize(all_checks_abs, 1)**2
