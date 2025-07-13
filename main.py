@@ -32,14 +32,13 @@ COMPUTE_INTERPOLATION_ACTS  = False
 COMPUTE_AVG_ACTS            = False
 COMPUTE_PCB_ACTS            = False
 
-# Load the corresponding datasets (train, val, test) in memory -- We suggest to try one model at a time because it is GPU-intensive
-LOAD_INTERPOLATION_CROSS_DS       = True
-LOAD_AVG_CROSS_DS                 = True
+# Load the corresponding datasets (train & val, test) in memory -- We suggest to train one model at a time because it is very GPU-intensive
+LOAD_INTERPOLATION_CROSS_DS       = False
+LOAD_AVG_CROSS_DS                 = False
 LOAD_PCB_CROSS_DS                 = True
 
 ### CROSSCODER CONFIG ###
 TRAIN_CROSSCODER            = True  # Train or use the already-trained crosscoder
-VAL_CROSSCODER              = True  # Crosscoder validation
 TEST_CROSSCODER             = False  # Test/analysis crosscoder
 
 ### OTHER PARAMS ###
@@ -510,7 +509,7 @@ if __name__ == '__main__':
                     LAMBDA_SPARSE,
                     pcb_suite['total_steps'],
                     pcb_suite['train_loader'],
-                    avg_suite['val_loader'],
+                    pcb_suite['val_loader'],
                     NUM_EPOCHS_CROSS,
                     LR_CROSS,
                     pcb_suite['weights_path'],
@@ -518,45 +517,6 @@ if __name__ == '__main__':
                     wandb_config=CROSSCODER_WANDB_CONFIG, 
                     project_name=PROJECT_NAME,
                     description='Crosscoder -- PCB Merging'
-                )
-
-        # Validate  Crosscoder
-        if VAL_CROSSCODER:
-
-            # 1) We validate crosscoder model trained on activations dataset from interpolation merge model
-            if LOAD_INTERPOLATION_CROSS_DS:
-                print('[DEBUG] Start Crosscoder Validation (interpolation)')
-                validate_crosscoder(
-                    LATENT_DIM,
-                    interpolated_suite['n_activations'],
-                    LAMBDA_SPARSE,
-                    interpolated_suite['total_steps'],
-                    interpolated_suite['weights_path'],
-                    interpolated_suite['val_loader'],
-                )
-
-            # 2) We validate crosscoder model trained on activations dataset from parameter averaging merge model   
-            if LOAD_AVG_CROSS_DS:
-                print('[DEBUG] Start Crosscoder Validation (avg)')
-                validate_crosscoder(
-                    LATENT_DIM,
-                    avg_suite['n_activations'],
-                    LAMBDA_SPARSE,
-                    avg_suite['total_steps'],
-                    avg_suite['weights_path'],
-                    avg_suite['val_loader'],
-                )
-
-            # 3) We validate crosscoder model trained on activations dataset from PCB merge model 
-            if LOAD_PCB_CROSS_DS:
-                print('[DEBUG] Start Crosscoder Validation (pcb)')
-                validate_crosscoder(
-                    LATENT_DIM,
-                    pcb_suite['n_activations'],
-                    LAMBDA_SPARSE,
-                    pcb_suite['total_steps'],
-                    pcb_suite['weights_path'],
-                    pcb_suite['val_loader'],
                 )
         
         if TEST_CROSSCODER: # Actual analysis
