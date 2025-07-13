@@ -10,5 +10,8 @@
 # cache
 /wandb/
 
+# Cache
+/__pycache__/
+
 # test stuff
 test.py

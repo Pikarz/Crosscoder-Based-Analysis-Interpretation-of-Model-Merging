@@ -207,16 +207,16 @@ if __name__ == '__main__':
 
             ### Finetuning
             print("[DEBUG] Starting Dice finetuning")
-            # finetune_resnet(dice_net, dice_train_loader, dice_val_loader,
-            #                     loss_func, optimizer, DICE_WANDB_CONFIG,
-            #                     NUM_EPOCHS,
-            #                     DICE_CLASS_NAMES,
-            #                     DICE_WEIGHTS_PATH,
-            #                     DICE_EXPERIMENT_NAME,
-            #                     DICE_DESCRIPTION,
-            #                     project_name=PROJECT_NAME,
-            #                     tags=['resnet', 'classification'],
-            # )
+            finetune_resnet(dice_net, dice_train_loader, dice_val_loader,
+                                loss_func, optimizer, DICE_WANDB_CONFIG,
+                                NUM_EPOCHS,
+                                DICE_CLASS_NAMES,
+                                DICE_WEIGHTS_PATH,
+                                DICE_EXPERIMENT_NAME,
+                                DICE_DESCRIPTION,
+                                project_name=PROJECT_NAME,
+                                tags=['resnet', 'classification'],
+            )
 
         else:
             dice_net = load_resnet_from_weights(DICE_WEIGHTS_PATH, DICE_NUM_CLASSES)
