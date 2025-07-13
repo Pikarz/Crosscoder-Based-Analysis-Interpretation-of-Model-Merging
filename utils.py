@@ -111,9 +111,10 @@ def train_crosscoder_and_save_weights(
     lambda_sparse,
     total_steps,
     train_loader,
+    val_loader,
     num_epochs,
     training_lr,
-    crosscoder_weights_path,
+    out_crosscoder_weights_path,
     experiment_name,
     wandb_config,
     project_name,
@@ -123,14 +124,12 @@ def train_crosscoder_and_save_weights(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     crosscoder.to(device)
 
-    crosscoder.train_cross(train_loader, num_epochs, training_lr, experiment_name, wandb_config, project_name, description)
+    # Preparing folder
+    dirpath = os.path.dirname(out_crosscoder_weights_path) 
+    os.makedirs(dirpath, exist_ok=True)
 
-    dirpath = os.path.dirname(crosscoder_weights_path)
-    
-    if dirpath:
-        os.makedirs(dirpath, exist_ok=True)
-    # save the model’s state dict
-    torch.save(crosscoder.state_dict(), crosscoder_weights_path)
+    crosscoder.train_cross(train_loader, val_loader, num_epochs, training_lr, out_crosscoder_weights_path, experiment_name, wandb_config, project_name, description)
+
     
 def validate_crosscoder(
   latent_dim,

@@ -1,10 +1,11 @@
 import einops
 import torch
 from torch import nn
-from torch.nn.utils import clip_grad_norm_
 import torch.nn.functional as F
 from tqdm import tqdm, trange
 from torch.optim.lr_scheduler import OneCycleLR
+import math
+import copy 
 import wandb
 
 N_MODELS = 3
@@ -39,19 +40,25 @@ class CrossCoder(nn.Module):
           self.W_dec.data.clone(),
           "latent_dim n_models n_activations -> n_models n_activations latent_dim"
       )
+    
+    self.b_enc = nn.Parameter(torch.ones(latent_dim))
+    self.b_dec = nn.Parameter(torch.ones(self.n_models, n_activations))
 
-    # biases
+    ### Other possible initializations:
+    ### The repeat() one seems to perform the best, but since it could be too much biased towards a 'good' result, we have decided to not use it
+    
+    ## biases
     # self.b_enc = nn.Parameter(torch.zeros(latent_dim))
     # self.b_dec = nn.Parameter(
     #     torch.zeros((self.n_models, self.n_activations))
     # )
 
-
+    ## encoder/decoder with repeat
     # self.W_enc = nn.Parameter( 
     #     torch.empty(self.n_models, self.n_activations, self.latent_dim)
     # )
     
-    # # Initialize a single decoder weight and repeat across all models
+    ## Initialize a single decoder weight and repeat across all models
     # w_dec_base = torch.empty(latent_dim, n_activations)
     # nn.init.kaiming_normal_(w_dec_base, nonlinearity="linear")
     # self.W_dec = nn.Parameter(
@@ -66,9 +73,6 @@ class CrossCoder(nn.Module):
     #       self.W_dec.data.clone(),
     #       "latent_dim n_models n_activations -> n_models n_activations latent_dim"
     #   )
-
-    self.b_enc = nn.Parameter(torch.ones(latent_dim))
-    self.b_dec = nn.Parameter(torch.ones(self.n_models, n_activations))
     
   def encode(self, activations):
     # activations: [crosscoder_batch, n_models, n_activations]
@@ -127,19 +131,18 @@ class CrossCoder(nn.Module):
     else:
         return self.lambda_sparse
 
-  def train_cross(self, train_loader, num_epochs, lr, experiment_name, wandb_config, 
-                  description,
+  def train_cross(self, train_loader, val_loader, num_epochs, lr, out_path, experiment_name, wandb_config, 
                   project_name,
+                  description,
                   tags=['resnet', 'classification'],):
     
     print('[DEBUG] Start Training')
    
     optimizer = torch.optim.Adam(
         self.parameters(),
-       # betas=(adam_beta_1, adam_beta_2),
     )
 
-    scheduler = OneCycleLR(
+    scheduler = OneCycleLR( 
         optimizer,
         max_lr=lr,
         steps_per_epoch=self.total_steps,
@@ -160,78 +163,95 @@ class CrossCoder(nn.Module):
     # Watch model
     run.watch(self, log='all', log_freq=100)
 
-    train_losses = []
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     self.to(device)
 
-    # Training Phase
-    self.train()
+    best_val_loss = math.inf
+    best_epoch = -1
 
     # Training loop
     for epoch in trange(num_epochs, desc="Epochs"): # trange is a shortcut of tqdm(range(...))
+        # Training Phase
+        self.train()
+
         running_loss = 0
         total_batches = 0
 
-        loop = tqdm(enumerate(train_loader), total=len(train_loader), desc="Training", leave=True)
-
+        loop = tqdm(enumerate(train_loader), total=len(train_loader), desc="Training", leave=False)
         for _, data in loop:
             # Get data to cuda if possible 
             activations = data.to(device)
-
-            self.current_step += 1
 
             # Forward pass + Compute loss
             loss = self.get_loss(activations)
 
             # Backward pass and optimization
             loss.backward()
-
             optimizer.step()
             scheduler.step()
+
             # Zero the parameter gradients
             optimizer.zero_grad()
 
+            self.current_step += 1
             running_loss += loss.item()
             total_batches += 1
 
         # Calculate average loss for the training epoch
         avg_train_loss = running_loss/total_batches
-        train_losses.append(avg_train_loss)
         self.current_step = 0 # At each epoch, we reset the step
 
         print(f'\nEpoch {epoch + 1}, Average Training Loss: {avg_train_loss:.4f}')
+        
+        ### Validation and save best current model
+        self.eval()
+        val_loss = self.val_cross(val_loader)
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_epoch = epoch + 1
+            best_model_wts = copy.deepcopy(self.state_dict())
+            print(f"[INFO] New best (epoch {best_epoch} | val_loss {best_val_loss:.4f})")
 
         run.log({
             "epoch": epoch + 1,
             "train_loss": avg_train_loss,
+            "val_loss": val_loss
         })
-
+    
+    # save the best model
+    if best_model_wts is not None:
+        torch.save(best_model_wts, out_path)
+        print(f"[INFO] Saved best model")
+           
+    # before finish, also log to W&B
+    artifact = wandb.Artifact(
+        name=f"{experiment_name}_best_model",
+        type="model",
+        description=(
+            f"Best model at epoch {best_epoch} "
+            f"(val_loss={best_val_loss:.4f})"
+        )
+    )
+    artifact.add_file(out_path)
+    run.log_artifact(artifact)
         
-    print('[OK] Finished CrossCoder Training')
-
-    # Save model weights
-    weights_path = f"{experiment_name}_weights.pth"
-    torch.save(self.state_dict(), weights_path)
-
-    # Log artifact
-    # artifact = wandb.Artifact(
-    #     name=f"{experiment_name}_model",
-    #     type="model",
-    #     description=f"Trained CrossCoder model - final average loss: {train_losses[-1]:.4f}"
-    # )
-    # artifact.add_file(weights_path)
-    # run.log_artifact(artifact)
-
+    # Finalize W&B
     wandb.finish()
+    
     print('[OK] Finished CrossCoder Training')
+    print(f"[OK] Best model was from epoch {best_epoch} with val_loss = {best_val_loss:.4f}")
+
+    return best_val_loss
+   
 
   def val_cross(self, val_loader):
-    print('[DEBUG] Start Validation')
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     self.to(device)
 
     running_loss = 0
+    total_batches = 0
 
     # Evaluation Phase
     self.eval()
@@ -246,10 +266,12 @@ class CrossCoder(nn.Module):
             loss = self.get_loss(activations)
 
             running_loss += loss.item()
+            total_batches += 1
 
-        print(f'[DEBUG] Validation Loss: {running_loss}')
+        avg_train_loss = running_loss/total_batches
+        print(f'[INFO] Validation Loss: {avg_train_loss:.4f}')
             
-        print('[OK] Finished CrossCoder Evaluation')
+    return avg_train_loss
 
 
   
