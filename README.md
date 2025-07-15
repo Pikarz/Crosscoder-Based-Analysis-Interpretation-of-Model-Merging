@@ -1,5 +1,5 @@
 # Crosscoder-Based Analysis of Model Merging
-A project for the Deep Learning course taught by Emanuele Rodolà Second Semester A.Y. 2024/2025 @ Università degli Studi di Roma "La Sapienza"
+A project for the Deep Learning course taught by Emanuele Rodolà A.Y. Summer 2024 @ Università degli Studi di Roma "La Sapienza"
 
 This project examines how merging two pretrained ResNet-50 models alters their internal representations. We apply Crosscoder model diffing, a sparse autoencoder trained on original and concatenated activations, to identify which features are:
 

@@ -77,7 +77,7 @@ def compute_dice_mean_and_std(path):
 def get_equally_distributed_subset(pokemon_dataset, dice_dataset, small_imagenet_dataset, n_models,
                                     crosscoder_datapoints=None):    
     # If we do not set a number of datapoints per dataset, we just take the smallest possible number so that the whole dataset remains equally distributed among the three different datasets
-    if not crosscoder_datapoints:
+    if crosscoder_datapoints is None:
       num_points_per_dataset = min(len(pokemon_dataset), len(dice_dataset), len(small_imagenet_dataset))
     else:
       num_points_per_dataset = int(crosscoder_datapoints // n_models) # we take the integer
@@ -109,7 +109,6 @@ def train_crosscoder_and_save_weights(
     latent_dim, 
     n_activations,
     lambda_sparse,
-    total_steps,
     train_loader,
     val_loader,
     num_epochs,
@@ -118,9 +117,10 @@ def train_crosscoder_and_save_weights(
     experiment_name,
     wandb_config,
     project_name,
-    description
+    description,
+    save=True
   ):
-    crosscoder = CrossCoder.CrossCoder(latent_dim, n_activations, lambda_sparse, total_steps)
+    crosscoder = CrossCoder.CrossCoder(latent_dim, n_activations, lambda_sparse)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     crosscoder.to(device)
 
@@ -128,7 +128,12 @@ def train_crosscoder_and_save_weights(
     dirpath = os.path.dirname(out_crosscoder_weights_path) 
     os.makedirs(dirpath, exist_ok=True)
 
-    crosscoder.train_cross(train_loader, val_loader, num_epochs, training_lr, out_crosscoder_weights_path, experiment_name, wandb_config, project_name, description)
+    crosscoder = crosscoder.train_cross(train_loader, num_epochs, training_lr)
+    if save:
+      torch.save(crosscoder.state_dict(), out_crosscoder_weights_path)
+
+    return crosscoder
+    #return crosscoder.train_cross(train_loader, val_loader, num_epochs, training_lr, out_crosscoder_weights_path, experiment_name, wandb_config, project_name, description)
 
     
 def validate_crosscoder(

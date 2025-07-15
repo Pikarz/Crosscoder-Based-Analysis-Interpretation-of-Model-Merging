@@ -2,13 +2,13 @@ import torch
 from torch.utils.data import DataLoader
 import numpy as np
 
-def get_dataloaders(dataset, batch_size, training_size, validation_size, test_size):
+def get_dataloaders(dataset, batch_size, training_size, validation_size, test_size, shuffle_train=True):
 
     assert np.allclose(np.array(training_size + validation_size + test_size), 1), "The splits must sum to one"
 
     train_set, valid_set, test_set = torch.utils.data.random_split(dataset, [training_size, validation_size, test_size])
 
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=shuffle_train)
     val_loader = DataLoader(valid_set, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
 
