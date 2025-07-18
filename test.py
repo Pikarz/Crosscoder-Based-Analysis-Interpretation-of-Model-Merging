@@ -1,44 +1,29 @@
-import torch
-import torchvision
-from torch import nn
-
-from resnet_model import load_resnet_from_weights
-PKMN_WEIGHTS_PATH   = './pokemon_resnet/model_weights.pth'
-PKMN_NUM_CLASSES    = 5 # num of pokemons in the dataset
-
-DICE_WEIGHTS_PATH   ='./dice_resnet/model_weights.pth'
-DICE_NUM_CLASSES    = 6 # num of dice in the dataset
-
-def count_sign_conflicts(model_a, model_b):
-    sd_a = model_a.state_dict()
-    sd_b = model_b.state_dict()
-
-    common_keys = set(sd_a.keys()).intersection(sd_b.keys())
-    diff = 0
-    total = 0
-
-    for k in sorted(common_keys):
-        wa = sd_a[k]
-        wb = sd_b[k]
-
-        if wa.shape != wb.shape:
-            # skip layers that don't match (e.g. the different fc heads)
-            continue
-
-        sa = wa.sign().view(-1)
-        sb = wb.sign().view(-1)
-        diff += int(((sa * sb) < 0).sum().item())
-        total += sa.numel()
-
-    return diff, total
+import CrossCoder
+import torch 
+import CrossCoderDataset
 
 if __name__ == '__main__':
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    LATENT_DIM=900
+    LAMBDA_SPARSE=2
+    BATCH_SIZE_CROSS = 64
+    TRAINING_SIZE_CROSS   = 0.7
+    VALIDATION_SIZE_CROSS = 0.1 # smaller validation because we just have to tune the latent_dim hyperparam
+    TEST_SIZE_CROSS       = 0.2
 
-    # pkmn_net = load_resnet_from_weights(PKMN_WEIGHTS_PATH, PKMN_NUM_CLASSES)
+    ACTIVATIONS_POKEMON_PATH = './activations_layer4/pokemon'
+    ACTIVATIONS_DICE_PATH = './activations_layer4/dice'
+    ACTIVATIONS_INTERPOLATED_PATH = './activations_layer4/interpolated'
 
-    # dice_net = load_resnet_from_weights(DICE_WEIGHTS_PATH, DICE_NUM_CLASSES)
+    model_names = ['dice', 'pokemon', 'merged']
+    ds = CrossCoderDataset.CrossCoderDataset(ACTIVATIONS_POKEMON_PATH, ACTIVATIONS_DICE_PATH, ACTIVATIONS_INTERPOLATED_PATH)
+    n_acts = ds.get_n_activations()
 
-    # print(dice_net)
+    # Crosscoder dataset with Interpolation merging technique
+    ACTIVATIONS_INTERPOLATED_PATH = './activations_layer4/interpolate'
+    interp = CrossCoder.CrossCoder(LATENT_DIM, n_acts, LAMBDA_SPARSE)
+    interp.load_state_dict(torch.load('./models/crosscoder/interpolated/model_weights.pth', weights_only=True))
+    interp.eval()
 
-    torch.clamp(torch.abs(all_checks), min_ratio=0.0001, max_ratio=0.0001)
+    min, max = interp.W_enc.min(), interp.W_enc.max()
+    interp.W_enc.data = (interp.W_enc - min)/(max - min)
+    print(interp.W_enc.min(), interp.W_enc.max())

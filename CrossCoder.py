@@ -75,7 +75,7 @@ class CrossCoder(nn.Module):
     # activations:  [crosscoder_batch, n_models, n_activations]
     u = self.encode(activations)
     z = F.relu(u)
-    recon = self.decode(z) # activations_dec is the reconstructions given our latent space
+    recon = self.decode(z) # reconstructions given our latent space
 
     return recon
   
@@ -88,8 +88,8 @@ class CrossCoder(nn.Module):
 
     decoder_norms = self.W_dec.norm(dim=-1)
     total_decoder_norm = decoder_norms.sum(dim=1)   # [latent_dim]
-    # sparsity on pre-act
-    l1_loss = (u.abs() * total_decoder_norm[None, :]).mean()
+    # sparsity 
+    l1_loss = (z * total_decoder_norm[None, :]).mean()
 
     return l2_loss, l1_loss
   
@@ -101,9 +101,9 @@ class CrossCoder(nn.Module):
 
 
   def get_l1_coeff(self):
-    # Linearly increases from 0 to cfg["l1_coeff"] over the first 0.05 * self.total_steps steps, then keeps it constant
-    if self.current_step < 0.05 * self.total_steps:
-        return self.lambda_sparse * self.current_step / (0.05 * self.total_steps)
+    # Ramp up more gradually over 10% of training
+    if self.current_step < 0.10 * self.total_steps:
+        return self.lambda_sparse * self.current_step / (0.10 * self.total_steps)
     else:
         return self.lambda_sparse
 
@@ -219,6 +219,3 @@ class CrossCoder(nn.Module):
         # })
             
         print('[OK] Finished CrossCoder Evaluation')
-
-
-  
