@@ -1,24 +1,15 @@
 import torch
-import matplotlib.pyplot as plt
 import numpy as np
-from typing import Tuple, Dict, List
 import matplotlib.pyplot as plt
-import numpy as np
-from typing import Tuple, Dict, List
+from typing import List, Dict, Tuple, Optional
 from itertools import combinations
-
+import seaborn as sns
+from mpl_toolkits.mplot3d import Axes3D
 
 class CrossCoderAnalysis:
-    """Analysis functions for CrossCoder model diffing on ResNet models."""
+    """Enhanced analysis functions for CrossCoder model diffing on ResNet models."""
     
     def __init__(self, crosscoder, model_names: List[str] = None):
-        """
-        Initialize the analysis with a crosscoder instance.
-        
-        Args:
-            crosscoder: CrossCoder instance with W_dec and W_enc attributes
-            model_names: List of model names (e.g., ['dice', 'pokemon', 'merged'])
-        """
         self.crosscoder = crosscoder
         self.W_dec = crosscoder.W_dec  # [latent_dim, n_models, n_activations]
         self.W_enc = crosscoder.W_enc  # [n_models, n_activations, latent_dim]
@@ -36,11 +27,11 @@ class CrossCoderAnalysis:
         # Compute relative decoder norms
         self.relative_norms = self._compute_relative_norms()
         
-        # Classify features for all models (triple analysis)
-        self.feature_classifications = self._classify_features()
+        # Classify features for pairwise comparisons
+        self.feature_classifications_pairwise = self._classify_features_pairwise()
         
-        # NEW: Pairwise feature classifications
-        self.pairwise_classifications = self._classify_features_pairwise()
+        # Classify features for 3-way comparison given the pairwise
+        self.feature_classifications_3way = self._classify_features_3way()
         
     def _compute_relative_norms(self) -> torch.Tensor:
         """Compute relative decoder norms for feature classification."""
@@ -53,64 +44,65 @@ class CrossCoderAnalysis:
         relative_norms = self.decoder_norms / total_norms  # [latent_dim, n_models]
         return relative_norms
     
-    def _classify_features(self, exclusive_threshold: float = 0.95) -> Dict:
-        """
-        Classify features as shared or exclusive based on relative decoder norms (triple analysis).
-        
-        Args:
-            exclusive_threshold: Threshold for classifying features as exclusive
-            
-        Returns:
-            Dictionary with feature classifications
-        """
+    def _classify_features_3way(self) -> Dict:
+        """Original 3-way classification."""
         classifications = {
-            'shared': [],
-            'exclusive': {model_name: [] for model_name in self.model_names}
+            'shared':    { 
+                'pokemon_dice_merged': set(),
+                'pokemon_vs_dice': set(),
+                'dice_vs_merged' : set(),
+                'pokemon_vs_merged': set()
+             },
+            'exclusive': {model_name: set() for model_name in self.model_names}
         }
         
-        for feature_idx in range(self.latent_dim):
-            rel_norms = self.relative_norms[feature_idx]
-            max_norm = torch.max(rel_norms)
-            max_model_idx = torch.argmax(rel_norms)
-            
-            if max_norm > exclusive_threshold:
-                # Feature is exclusive to the model with max norm
-                model_name = self.model_names[max_model_idx]
-                classifications['exclusive'][model_name].append(feature_idx)
+        for pair_name, features in self.feature_classifications_pairwise.items():
+            ### Compute 3-way shared features
+            if len(classifications['shared']['pokemon_dice_merged']) == 0:
+                classifications['shared']['pokemon_dice_merged'] = set(features['shared'])
             else:
-                # Feature is shared
-                classifications['shared'].append(feature_idx)
-                
-        return classifications
-    
-    def _classify_features_pairwise(self, exclusive_threshold: float = 0.95) -> Dict:
-        """
-        Classify features for each pair of models.
-        
-        Args:
-            exclusive_threshold: Threshold for classifying features as exclusive
+                classifications['shared']['pokemon_dice_merged'] = set.intersection(classifications['shared']['pokemon_dice_merged'], features['shared'])
             
-        Returns:
-            Dictionary with pairwise feature classifications
-        """
+            # Compute pair-wise shared features
+            classifications['shared'][pair_name] = set(features['shared']).difference()
+
+            for model in self.model_names:
+                if model not in pair_name:
+                    continue # the pairwise is not about this model
+                if len(classifications['exclusive'][model]) == 0: # first step, we just add everything
+                    classifications['exclusive'][model] = set(features['exclusive'][model])
+                else: # second step, we take the intersection to get the features that are actually exclusive for a given model respect to the others two
+                    classifications['exclusive'][model] = set.intersection(classifications['exclusive'][model], set(features['exclusive'][model]))
+
+        # return to list
+        classifications['shared'] = list(classifications['shared'])
+        for model_name in self.model_names:
+            classifications['exclusive'][model_name] = list(classifications['exclusive'][model_name])
+        
+        return classifications
+                    
+
+    def _classify_features_pairwise(self, exclusive_threshold: float = 0.95) -> Dict:
+        """Pairwise classification between all model pairs."""
         pairwise_classifications = {}
         
-        # Generate all pairwise combinations
-        for (model1_idx, model1_name), (model2_idx, model2_name) in combinations(enumerate(self.model_names), 2):
-            pair_key = f"{model1_name}_vs_{model2_name}"
+        # Generate all possible pairs
+        model_pairs = list(combinations(range(self.n_models), 2))
+        
+        for i, j in model_pairs:
+            model_i_name = self.model_names[i]
+            model_j_name = self.model_names[j]
+            pair_name = f"{model_i_name}_vs_{model_j_name}"
             
-            # Extract decoder norms for this pair
-            pair_norms = self.decoder_norms[:, [model1_idx, model2_idx]]  # [latent_dim, 2]
-            
-            # Compute relative norms for this pair only
-            pair_total_norms = torch.sum(pair_norms, dim=1, keepdim=True)  # [latent_dim, 1]
+            # Get relative norms for this pair only
+            pair_norms = self.decoder_norms[:, [i, j]]  # [latent_dim, 2]
+            pair_total_norms = torch.sum(pair_norms, dim=1, keepdim=True)
             pair_total_norms = torch.clamp(pair_total_norms, min=1e-8)
-            pair_relative_norms = pair_norms / pair_total_norms  # [latent_dim, 2]
+            pair_relative_norms = pair_norms / pair_total_norms
             
-            # Classify features for this pair
-            pair_classifications = {
+            classifications = {
                 'shared': [],
-                'exclusive': {model1_name: [], model2_name: []}
+                'exclusive': {model_i_name: [], model_j_name: []}
             }
             
             for feature_idx in range(self.latent_dim):
@@ -121,308 +113,143 @@ class CrossCoderAnalysis:
                 if max_norm > exclusive_threshold:
                     # Feature is exclusive to one model in this pair
                     if max_model_idx == 0:
-                        pair_classifications['exclusive'][model1_name].append(feature_idx)
+                        classifications['exclusive'][model_i_name].append(feature_idx)
                     else:
-                        pair_classifications['exclusive'][model2_name].append(feature_idx)
+                        classifications['exclusive'][model_j_name].append(feature_idx)
                 else:
-                    # Feature is shared between this pair
-                    pair_classifications['shared'].append(feature_idx)
+                    # Feature is shared between these two models
+                    classifications['shared'].append(feature_idx)
             
-            pairwise_classifications[pair_key] = {
-                'classifications': pair_classifications,
-                'relative_norms': pair_relative_norms,
-                'model_names': [model1_name, model2_name],
-                'model_indices': [model1_idx, model2_idx]
-            }
-        
+            pairwise_classifications[pair_name] = classifications
+            
         return pairwise_classifications
     
-    def plot_pairwise_decoder_norms_paper_style(self, figsize: Tuple[int, int] = (15, 5)) -> plt.Figure:
-        """
-        Plot pairwise relative decoder norms in the exact style of the crosscoder diffing paper.
-        Each plot shows a single distribution where 0 = all first model, 1 = all second model.
+    def plot_pairwise_comparison_matrix(self, figsize: Tuple[int, int] = (15, 10)) -> plt.Figure:
+        """Create a matrix visualization of pairwise comparisons."""
+        n_pairs = len(self.feature_classifications_pairwise)
         
-        Args:
-            figsize: Figure size
-            
-        Returns:
-            matplotlib Figure object
-        """
-        n_pairs = len(self.pairwise_classifications)
+        # Calculate grid size
+        n_cols = min(3, n_pairs)
+        n_rows = (n_pairs + n_cols - 1) // n_cols
         
-        # Create horizontal subplot layout
-        fig, axes = plt.subplots(1, n_pairs, figsize=figsize)
-        
-        # If only one pair, ensure axes is iterable
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
         if n_pairs == 1:
             axes = [axes]
+        elif n_rows == 1:
+            axes = axes.reshape(1, -1)
         
-        pair_idx = 0
-        for pair_key, pair_data in self.pairwise_classifications.items():
-            model1_name, model2_name = pair_data['model_names']
-            pair_relative_norms = pair_data['relative_norms']
-            
-            # Use model1's relative norm (0 = all model1, 1 = all model2)
-            rel_norms = pair_relative_norms[:, 0].detach().cpu().numpy()
-            
-            # Create histogram with paper-style formatting
-            axes[pair_idx].hist(rel_norms, bins=50, alpha=0.8, density=True, 
-                              color='#2E86AB', edgecolor='none')
-            
-            # Paper-style labels and formatting
-            axes[pair_idx].set_xlabel('Relative decoder norm', fontsize=12)
-            axes[pair_idx].set_ylabel('Density', fontsize=12)
-            axes[pair_idx].set_title(f'{model1_name} vs {model2_name}', fontsize=14, fontweight='bold')
-            
-            # Add model name annotations at the extremes
-            axes[pair_idx].text(0.02, 0.98, model1_name, transform=axes[pair_idx].transAxes, 
-                              verticalalignment='top', fontsize=12, fontweight='bold',
-                              bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
-            axes[pair_idx].text(0.98, 0.98, model2_name, transform=axes[pair_idx].transAxes, 
-                              verticalalignment='top', horizontalalignment='right', fontsize=12, fontweight='bold',
-                              bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
-            
-            # Clean grid
-            #axesimport matplotlib.pyplot as plt
-    
-    def plot_pairwise_feature_analysis(self, figsize: Tuple[int, int] = (20, 15)) -> plt.Figure:
-        """
-        Plot comprehensive pairwise feature analysis.
+        axes = axes.flatten()
         
-        Args:
-            figsize: Figure size
+        for idx, (pair_name, classifications) in enumerate(self.feature_classifications_pairwise.items()):
+            if idx >= len(axes):
+                break
+                
+            ax = axes[idx]
             
-        Returns:
-            matplotlib Figure object
-        """
-        n_pairs = len(self.pairwise_classifications)
-        
-        # Create subplots: 4 rows x n_pairs columns
-        fig, axes = plt.subplots(4, n_pairs, figsize=figsize)
-        
-        # If only one pair, ensure axes is 2D
-        if n_pairs == 1:
-            axes = axes.reshape(-1, 1)
-        
-        pair_idx = 0
-        for pair_key, pair_data in self.pairwise_classifications.items():
-            model1_name, model2_name = pair_data['model_names']
-            model1_idx, model2_idx = pair_data['model_indices']
-            pair_classifications = pair_data['classifications']
-            pair_relative_norms = pair_data['relative_norms']
+            # Extract model names from pair
+            model_names = pair_name.split('_vs_')
+            model_1, model_2 = model_names[0], model_names[1]
             
-            # Plot 1: Bar chart of feature counts for this pair
-            shared_count = len(pair_classifications['shared'])
-            model1_exclusive = len(pair_classifications['exclusive'][model1_name])
-            model2_exclusive = len(pair_classifications['exclusive'][model2_name])
+            # Get counts
+            shared_count = len(classifications['shared'])
+            exclusive_1_count = len(classifications['exclusive'][model_1])
+            exclusive_2_count = len(classifications['exclusive'][model_2])
             
-            counts = [shared_count, model1_exclusive, model2_exclusive]
-            labels = ['Shared', f'{model1_name}\nExclusive', f'{model2_name}\nExclusive']
-            colors = ['#4CAF50', '#FF6B6B', '#4FC3F7']
+            # Create pie chart
+            sizes = [shared_count, exclusive_1_count, exclusive_2_count]
+            labels = [f'Shared\n({shared_count})', f'{model_1} Exclusive\n({exclusive_1_count})', 
+                     f'{model_2} Exclusive\n({exclusive_2_count})']
+            colors = ['#2E86AB', '#F24236', '#F6AE2D']
             
-            bars = axes[0, pair_idx].bar(range(3), counts, color=colors, alpha=0.7)
-            axes[0, pair_idx].set_xlabel('Feature Type')
-            axes[0, pair_idx].set_ylabel('Number of Features')
-            axes[0, pair_idx].set_title(f'{model1_name} vs {model2_name}\nPairwise Feature Distribution')
-            axes[0, pair_idx].set_xticks(range(3))
-            axes[0, pair_idx].set_xticklabels(labels, rotation=45, ha='right')
+            # Only plot non-zero slices
+            non_zero_sizes = [s for s in sizes if s > 0]
+            non_zero_labels = [l for i, l in enumerate(labels) if sizes[i] > 0]
+            non_zero_colors = [c for i, c in enumerate(colors) if sizes[i] > 0]
             
-            # Add count labels on bars
-            for bar, count in zip(bars, counts):
-                height = bar.get_height()
-                axes[0, pair_idx].text(bar.get_x() + bar.get_width()/2., height + 0.01*max(counts),
-                                    f'{count}', ha='center', va='bottom')
-            
-            # Plot 2: Relative decoder norms comparison for this pair
-            rel_norms_model1 = pair_relative_norms[:, 0].detach().cpu().numpy()
-            rel_norms_model2 = pair_relative_norms[:, 1].detach().cpu().numpy()
-            
-            axes[1, pair_idx].hist(rel_norms_model1, bins=30, alpha=0.7, 
-                                label=model1_name, density=True, 
-                                color='#FF6B6B', edgecolor='black', linewidth=0.5)
-            axes[1, pair_idx].hist(rel_norms_model2, bins=30, alpha=0.7, 
-                                label=model2_name, density=True,
-                                color='#4FC3F7', edgecolor='black', linewidth=0.5)
-            
-            axes[1, pair_idx].set_xlabel('Relative Decoder Norm')
-            axes[1, pair_idx].set_ylabel('Density')
-            axes[1, pair_idx].set_title(f'{model1_name} vs {model2_name}\nPairwise Decoder Norms')
-            axes[1, pair_idx].legend()
-            axes[1, pair_idx].grid(True, alpha=0.3)
-            
-            # Plot 3: Pie chart for this pair
-            sizes = [shared_count, model1_exclusive, model2_exclusive]
-            labels_pie = ['Shared', f'{model1_name} Exclusive', f'{model2_name} Exclusive']
-            colors_pie = ['#4CAF50', '#FF6B6B', '#4FC3F7']
-            
-            # Only show non-zero slices
-            non_zero_sizes = []
-            non_zero_labels = []
-            non_zero_colors = []
-            
-            for size, label, color in zip(sizes, labels_pie, colors_pie):
-                if size > 0:
-                    non_zero_sizes.append(size)
-                    non_zero_labels.append(label)
-                    non_zero_colors.append(color)
-            
-            if len(non_zero_sizes) > 0:
-                wedges, texts, autotexts = axes[2, pair_idx].pie(non_zero_sizes, labels=non_zero_labels, 
-                                                                colors=non_zero_colors, autopct='%1.1f%%', 
-                                                                startangle=90)
-                # Make text more readable
-                for autotext in autotexts:
-                    autotext.set_color('white')
-                    autotext.set_fontweight('bold')
-                axes[2, pair_idx].set_title(f'{model1_name} vs {model2_name}\nPairwise Distribution')
+            if non_zero_sizes:
+                ax.pie(non_zero_sizes, labels=non_zero_labels, colors=non_zero_colors, 
+                      autopct='%1.1f%%', startangle=90)
             else:
-                axes[2, pair_idx].text(0.5, 0.5, 'No features found', 
-                                    ha='center', va='center', transform=axes[2, pair_idx].transAxes,
-                                    fontsize=12, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray"))
-                axes[2, pair_idx].set_title(f'{model1_name} vs {model2_name}\nPairwise Distribution')
+                ax.text(0.5, 0.5, 'No features\nfound', ha='center', va='center', 
+                       transform=ax.transAxes)
             
-            # Plot 4: Scatter plot of relative norms
-            axes[3, pair_idx].scatter(rel_norms_model1, rel_norms_model2, alpha=0.6, s=20)
-            axes[3, pair_idx].set_xlabel(f'{model1_name} Relative Norm')
-            axes[3, pair_idx].set_ylabel(f'{model2_name} Relative Norm')
-            axes[3, pair_idx].set_title(f'{model1_name} vs {model2_name}\nRelative Norm Scatter')
-            axes[3, pair_idx].grid(True, alpha=0.3)
-            
-            # Add diagonal line for reference
-            axes[3, pair_idx].plot([0, 1], [0, 1], 'r--', alpha=0.5, linewidth=1)
-            
-            pair_idx += 1
+            ax.set_title(f'{model_1} vs {model_2}', fontsize=12, fontweight='bold')
+        
+        # Hide unused subplots
+        for idx in range(len(self.feature_classifications_pairwise), len(axes)):
+            axes[idx].set_visible(False)
         
         plt.tight_layout()
         return fig
     
-    def plot_triple_vs_pairwise_comparison(self, figsize: Tuple[int, int] = (15, 10)) -> plt.Figure:
-        """
-        Compare triple analysis with pairwise analyses.
-        
-        Args:
-            figsize: Figure size
+    def plot_3d_feature_space(self, figsize: Tuple[int, int] = (12, 10)) -> plt.Figure:
+        """Create a 3D visualization of feature classifications (for 3 models)."""
+        if self.n_models != 3:
+            print(f"3D visualization only available for 3 models, found {self.n_models}")
+            return None
             
-        Returns:
-            matplotlib Figure object
-        """
-        fig, axes = plt.subplots(2, 2, figsize=figsize)
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection='3d')
         
-        # Plot 1: Triple analysis summary
-        triple_shared = len(self.feature_classifications['shared'])
-        triple_exclusive = [len(self.feature_classifications['exclusive'][model]) 
-                           for model in self.model_names]
+        # Get relative norms for all features
+        rel_norms = self.relative_norms.detach().cpu().numpy()  # [latent_dim, 3]
         
-        counts = [triple_shared] + triple_exclusive
-        labels = ['Shared'] + [f'{model}\nExclusive' for model in self.model_names]
-        colors = ['#4CAF50', '#FF6B6B', '#4FC3F7', '#FFA726']
+        # Color code by 3-way classification
+        colors = []
+        labels = []
+
+        print(f"3WAY EXCLUSIVE: \n{self.feature_classifications_3way['exclusive']}")
+        print(f"PAIR EXCLUSIVE: \n{self.feature_classifications_pairwise}")
         
-        bars = axes[0, 0].bar(range(len(counts)), counts, color=colors, alpha=0.7)
-        axes[0, 0].set_xlabel('Feature Type')
-        axes[0, 0].set_ylabel('Number of Features')
-        axes[0, 0].set_title('Triple Analysis\n(All 3 Models Together)')
-        axes[0, 0].set_xticks(range(len(counts)))
-        axes[0, 0].set_xticklabels(labels, rotation=45, ha='right')
+        for feature_idx in range(self.latent_dim):
+            if feature_idx in self.feature_classifications_3way['shared']:
+                colors.append('#2E86AB')  # Blue for shared
+                labels.append('Shared')
+            else:
+                # Find which model this feature is exclusive to
+                for model_idx, model_name in enumerate(self.model_names):
+                    if feature_idx in self.feature_classifications_3way['exclusive'][model_name]:
+                        if model_idx == 0:
+                            colors.append('#F24236')  # Red for model 0
+                            labels.append(f'{model_name} Exclusive')
+                        elif model_idx == 1:
+                            colors.append('#F6AE2D')  # Yellow for model 1
+                            labels.append(f'{model_name} Exclusive')
+                        else:
+                            colors.append('#A23B72')  # Purple for model 2
+                            labels.append(f'{model_name} Exclusive')
+                        break
         
-        # Add count labels on bars
-        for bar, count in zip(bars, counts):
-            height = bar.get_height()
-            axes[0, 0].text(bar.get_x() + bar.get_width()/2., height + 0.01*max(counts),
-                           f'{count}', ha='center', va='bottom')
+        # Plot points
+        scatter = ax.scatter(rel_norms[:, 0], rel_norms[:, 1], rel_norms[:, 2], 
+                           c=colors, alpha=0.6, s=20)
         
-        # Plot 2: Pairwise analysis summary
-        pair_names = []
-        pair_shared = []
-        pair_exclusive_counts = []
+        # Set labels
+        ax.set_xlabel(f'{self.model_names[0]} Relative Norm', fontsize=12)
+        ax.set_ylabel(f'{self.model_names[1]} Relative Norm', fontsize=12)
+        ax.set_zlabel(f'{self.model_names[2]} Relative Norm', fontsize=12)
+        ax.set_title('3D Feature Space: Relative Decoder Norms', fontsize=14, fontweight='bold')
         
-        for pair_key, pair_data in self.pairwise_classifications.items():
-            pair_classifications = pair_data['classifications']
-            model1_name, model2_name = pair_data['model_names']
-            
-            pair_names.append(pair_key.replace('_vs_', ' vs '))
-            pair_shared.append(len(pair_classifications['shared']))
-            pair_exclusive_counts.append([
-                len(pair_classifications['exclusive'][model1_name]),
-                len(pair_classifications['exclusive'][model2_name])
-            ])
+        # Add legend
+        unique_labels = list(set(labels))
+        unique_colors = []
+        for label in unique_labels:
+            idx = labels.index(label)
+            unique_colors.append(colors[idx])
         
-        x = np.arange(len(pair_names))
-        width = 0.25
+        # Create legend elements
+        legend_elements = []
+        for color, label in zip(unique_colors, unique_labels):
+            legend_elements.append(plt.Line2D([0], [0], marker='o', color='w', 
+                                            markerfacecolor=color, markersize=8, label=label))
         
-        bars1 = axes[0, 1].bar(x - width, pair_shared, width, label='Shared', color='#4CAF50', alpha=0.7)
-        bars2 = axes[0, 1].bar(x, [counts[0] for counts in pair_exclusive_counts], width, 
-                              label='Model 1 Exclusive', color='#FF6B6B', alpha=0.7)
-        bars3 = axes[0, 1].bar(x + width, [counts[1] for counts in pair_exclusive_counts], width,
-                              label='Model 2 Exclusive', color='#4FC3F7', alpha=0.7)
+        ax.legend(handles=legend_elements, loc='upper right')
         
-        axes[0, 1].set_xlabel('Model Pairs')
-        axes[0, 1].set_ylabel('Number of Features')
-        axes[0, 1].set_title('Pairwise Analysis Summary')
-        axes[0, 1].set_xticks(x)
-        axes[0, 1].set_xticklabels(pair_names, rotation=45, ha='right')
-        axes[0, 1].legend()
-        
-        # Plot 3: Comparison of shared features (triple vs pairwise)
-        pairwise_shared_avg = np.mean(pair_shared)
-        comparison_data = [triple_shared, pairwise_shared_avg]
-        comparison_labels = ['Triple Analysis\n(All 3 Models)', 'Pairwise Average\n(2 Models)']
-        
-        bars = axes[1, 0].bar(range(2), comparison_data, color=['#4CAF50', '#2196F3'], alpha=0.7)
-        axes[1, 0].set_xlabel('Analysis Type')
-        axes[1, 0].set_ylabel('Number of Shared Features')
-        axes[1, 0].set_title('Shared Features: Triple vs Pairwise')
-        axes[1, 0].set_xticks(range(2))
-        axes[1, 0].set_xticklabels(comparison_labels)
-        
-        # Add count labels on bars
-        for bar, count in zip(bars, comparison_data):
-            height = bar.get_height()
-            axes[1, 0].text(bar.get_x() + bar.get_width()/2., height + 0.01*max(comparison_data),
-                           f'{count:.1f}', ha='center', va='bottom')
-        
-        # Plot 4: Feature overlap analysis
-        # Show how features classified as shared in triple analysis are distributed in pairwise
-        triple_shared_features = set(self.feature_classifications['shared'])
-        
-        overlap_data = []
-        overlap_labels = []
-        
-        for pair_key, pair_data in self.pairwise_classifications.items():
-            pair_classifications = pair_data['classifications']
-            pair_shared_features = set(pair_classifications['shared'])
-            
-            # Count how many triple-shared features are also pairwise-shared
-            overlap = len(triple_shared_features.intersection(pair_shared_features))
-            overlap_data.append(overlap)
-            overlap_labels.append(pair_key.replace('_vs_', ' vs '))
-        
-        bars = axes[1, 1].bar(range(len(overlap_data)), overlap_data, color='#9C27B0', alpha=0.7)
-        axes[1, 1].set_xlabel('Model Pairs')
-        axes[1, 1].set_ylabel('Overlapping Shared Features')
-        axes[1, 1].set_title('Triple-Shared Features\nFound in Pairwise Analysis')
-        axes[1, 1].set_xticks(range(len(overlap_data)))
-        axes[1, 1].set_xticklabels(overlap_labels, rotation=45, ha='right')
-        
-        # Add count labels on bars
-        for bar, count in zip(bars, overlap_data):
-            height = bar.get_height()
-            axes[1, 1].text(bar.get_x() + bar.get_width()/2., height + 0.01*max(overlap_data),
-                           f'{count}', ha='center', va='bottom')
-        
-        plt.tight_layout()
         return fig
     
     def plot_cosine_similarity_shared_features(self, figsize: Tuple[int, int] = (12, 8)) -> plt.Figure:
-        """
-        Plot cosine similarity matrix and distribution for shared features.
-        
-        Args:
-            figsize: Figure size
-            
-        Returns:
-            matplotlib Figure object
-        """
-        shared_indices = self.feature_classifications['shared']
+        """Plot cosine similarity for shared features (enhanced version)."""
+        shared_indices = self.feature_classifications_3way['shared']
         
         if len(shared_indices) == 0:
             print("No shared features found!")
@@ -488,18 +315,7 @@ class CrossCoderAnalysis:
     
     def plot_feature_density(self, activations: torch.Tensor, figsize: Tuple[int, int] = (10, 6), 
                         activation_threshold: float = 1e-6) -> plt.Figure:
-        """
-        Plot density (activation frequency) of shared and exclusive features.
-        Replicates the style from the crosscoder diffing paper.
-        
-        Args:
-            activations: Feature activations tensor [n_samples, latent_dim]
-            figsize: Figure size
-            activation_threshold: Threshold for considering a feature as "active"
-            
-        Returns:
-            matplotlib Figure object
-        """
+        """Enhanced feature density plot with pairwise comparisons."""
         print(f"Activations shape: {activations.shape}")
         print(f"Activations stats: min={activations.min():.6f}, max={activations.max():.6f}, mean={activations.mean():.6f}")
         print(f"Non-zero activations: {(activations != 0).sum().item()} / {activations.numel()}")
@@ -511,19 +327,19 @@ class CrossCoderAnalysis:
         print(f"Feature density stats: min={activation_freq.min():.6f}, max={activation_freq.max():.6f}, mean={activation_freq.mean():.6f}")
         print(f"Features with non-zero density: {(activation_freq > 0).sum()} / {len(activation_freq)}")
         
-        # Separate by feature type
-        shared_indices = self.feature_classifications['shared']
+        # Separate by feature type (3-way)
+        shared_indices = self.feature_classifications_3way['shared']
         shared_densities = activation_freq[shared_indices] if shared_indices else []
         
-        # Combine all exclusive features into one group (as in the paper)
+        # Combine all exclusive features into one group
         all_exclusive_indices = []
         for model_name in self.model_names:
-            exclusive_indices = self.feature_classifications['exclusive'][model_name]
+            exclusive_indices = self.feature_classifications_3way['exclusive'][model_name]
             all_exclusive_indices.extend(exclusive_indices)
         
         exclusive_densities = activation_freq[all_exclusive_indices] if all_exclusive_indices else []
         
-        # Filter out zero densities for better visualization AND to avoid log scale issues
+        # Filter out zero densities
         shared_densities = [d for d in shared_densities if d > 0]
         exclusive_densities = [d for d in exclusive_densities if d > 0]
         
@@ -540,21 +356,18 @@ class CrossCoderAnalysis:
             ax.set_title('Feature density, shared and model-exclusive features', fontsize=14, fontweight='bold')
             return fig
         
-        # Determine if we should use log scale based on data range
+        # Determine if we should use log scale
         all_densities = shared_densities + exclusive_densities
         min_density = min(all_densities)
         max_density = max(all_densities)
         
-        # Only use log scale if we have a reasonable range and all values are positive
         use_log_scale = (min_density > 0) and (max_density / min_density > 10)
         
         if use_log_scale:
-            # Create log-spaced bins
-            min_log = np.log10(max(min_density, 1e-8))  # Avoid log(0)
+            min_log = np.log10(max(min_density, 1e-8))
             max_log = np.log10(max_density)
             bins = np.logspace(min_log, max_log, 50)
         else:
-            # Create linear-spaced bins
             bins = np.linspace(min_density, max_density, 50)
         
         # Plot shared features
@@ -568,36 +381,20 @@ class CrossCoderAnalysis:
                 label=f'Model-exclusive features (n={len(exclusive_densities)})', 
                 color='#F24236', density=True, edgecolor='black', linewidth=0.5)
         
-        # Style the plot to match the paper
         ax.set_xlabel('Feature density', fontsize=12)
         ax.set_ylabel('Density', fontsize=12)
-        ax.set_title('Feature density, shared and model-exclusive features', fontsize=14, fontweight='bold')
         
-        # Only use log scale if appropriate
-        if use_log_scale:
-            ax.set_xscale('log')
-            ax.set_yscale('log')
-            scale_note = " (log scale)"
-        else:
-            scale_note = " (linear scale)"
-        
+        scale_note = " (log scale)" if use_log_scale else " (linear scale)"
         ax.set_title(f'Feature density, shared and model-exclusive features{scale_note}', 
                     fontsize=14, fontweight='bold')
         
-        # Add grid
-        ax.grid(True, alpha=0.3, which='both' if use_log_scale else 'major')
+        if use_log_scale:
+            ax.set_xscale('log')
+            ax.set_yscale('log')
         
-        # Add legend
+        ax.grid(True, alpha=0.3, which='both' if use_log_scale else 'major')
         ax.legend(frameon=True, fancybox=True, shadow=True, framealpha=0.9)
         
-        # Set axis limits if needed
-        if len(shared_densities) > 0 or len(exclusive_densities) > 0:
-            if use_log_scale:
-                ax.set_xlim(max(min_density * 0.5, 1e-8), max_density * 2)
-            else:
-                ax.set_xlim(min_density * 0.95, max_density * 1.05)
-        
-        # Add some statistics as text
         if len(shared_densities) > 0 and len(exclusive_densities) > 0:
             shared_median = np.median(shared_densities)
             exclusive_median = np.median(exclusive_densities)
@@ -608,175 +405,395 @@ class CrossCoderAnalysis:
         
         plt.tight_layout()
         return fig
-    
-    def plot_feature_density_log(self,
-                             activations: torch.Tensor,
-                             figsize: Tuple[int,int] = (10,6),
-                             activation_threshold: float = 1e-6,
-                             eps: float = 1e-8) -> plt.Figure:
-        """
-        Step‐plot tratteggiato in log10, con istogrammi normalizzati (density=True),
-        così le esclusive non vengono schiacciate.
-        """
-        import numpy as np
-        import matplotlib.pyplot as plt
-
-        freq = torch.mean((activations > activation_threshold).float(), dim=0)
-        freq = freq.detach().cpu().numpy()
-        logf = np.log10(freq + eps)
-
-        shared_idx = self.feature_classifications['shared']
-        excl_idx   = self.feature_classifications['exclusive']
-
-        logf_shared = logf[shared_idx] if shared_idx else np.array([])
-        logf_excl   = {
-            m: logf[excl_idx[m]] if excl_idx[m] else np.array([])
-            for m in self.model_names
-        }
-
-        all_vals = np
-
-    # =============================================================
-    #  1.  Utility – compute relative norms for an ordered pair
-    # =============================================================
-    def _pair_relative_norms(self,
-                            idx_a: int,
-                            idx_b: int,
-                            eps: float = 1e-8) -> torch.Tensor:
-        """
-        Return a length‑latent_dim tensor r where
         
-            r[i] = 0   -> feature i writes *only* to model A
-            r[i] = 0.5 -> feature i writes equally to A and B
-            r[i] = 1   -> feature i writes *only* to model B
+    def get_feature_summary(self) -> Dict:
+        """Get a comprehensive summary of both 3-way and pairwise analysis."""
+        summary = {
+            'total_features': self.latent_dim,
+            '3way_analysis': {
+                'shared_features': len(self.feature_classifications_3way['shared']),
+                'exclusive_features': {},
+                'shared_percentage': len(self.feature_classifications_3way['shared']) / self.latent_dim * 100
+            },
+            'pairwise_analysis': {}
+        }
+        
+        # 3-way analysis
+        for model_name in self.model_names:
+            count = len(self.feature_classifications_3way['exclusive'][model_name])
+            summary['3way_analysis']['exclusive_features'][model_name] = count
+            summary['3way_analysis'][f'{model_name}_exclusive_percentage'] = count / self.latent_dim * 100
+        
+        # Pairwise analysis
+        for pair_name, classifications in self.feature_classifications_pairwise.items():
+            shared_count = len(classifications['shared'])
+            exclusive_counts = {model: len(indices) for model, indices in classifications['exclusive'].items()}
             
-        Parameters
-        ----------
-        idx_a, idx_b : int
-            Indices of the two models you want to compare.
-        eps : float
-            Numerical guard to avoid division by zero.
-
-        Notes
-        -----
-        This matches the definition used in §“Crosscoder model diffing recap”
-        of the update post (peaks at 0, ½, 1):contentReference[oaicite:0]{index=0}.
-        """
-        pair_norms = self.decoder_norms[:, [idx_a, idx_b]]          # [latent_dim, 2]
-        totals     = pair_norms.sum(dim=1, keepdim=True).clamp_min(eps)
-        rel        = pair_norms[:, 1] / totals.squeeze(1)           # weight on model B
-        return rel          # shape: [latent_dim]
-
-
-    # =============================================================
-    #  2.  Boolean mask for “exclusive” features in a pair
-    # =============================================================
-    def _pair_exclusive_masks(self,
-                            idx_a: int,
-                            idx_b: int,
-                            thresh: float = 0.05) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Returns two boolean masks (len = latent_dim):
-            mask_a → exclusive to model A   (relative ≤ thresh)
-            mask_b → exclusive to model B   (relative ≥ 1‑thresh)
-        Anything in between is treated as shared.
-        """
-        rel = self._pair_relative_norms(idx_a, idx_b)
-        mask_b = rel >= (1.0 - thresh)
-        mask_a = rel <= thresh
-        return mask_a, mask_b
+            summary['pairwise_analysis'][pair_name] = {
+                'shared_features': shared_count,
+                'shared_percentage': shared_count / self.latent_dim * 100,
+                'exclusive_features': exclusive_counts
+            }
+        
+        return summary
     
-    # =============================================================
-    #  3.  Paper‑style histogram for ONE pair
-    # =============================================================
-    def plot_relative_norm_hist(self,
-                                idx_a: int,
-                                idx_b: int,
-                                bins: int = 60,
-                                ax: plt.Axes | None = None) -> plt.Axes:
+    def print_summary(self):
+        """Print a comprehensive formatted summary of the analysis."""
+        summary = self.get_feature_summary()
+        
+        print("=" * 60)
+        print("ENHANCED CROSSCODER ANALYSIS SUMMARY")
+        print("=" * 60)
+        print(f"Total Features: {summary['total_features']}")
+        
+        print("\n" + "=" * 40)
+        print("3-WAY ANALYSIS (All models together)")
+        print("=" * 40)
+        print(f"Shared Features: {summary['3way_analysis']['shared_features']} ({summary['3way_analysis']['shared_percentage']:.1f}%)")
+        print("\nExclusive Features:")
+        for model_name in self.model_names:
+            count = summary['3way_analysis']['exclusive_features'][model_name]
+            percentage = summary['3way_analysis'][f'{model_name}_exclusive_percentage']
+            print(f"  {model_name}: {count} ({percentage:.1f}%)")
+        
+        print("\n" + "=" * 40)
+        print("PAIRWISE ANALYSIS")
+        print("=" * 40)
+        for pair_name, pair_data in summary['pairwise_analysis'].items():
+            print(f"\n{pair_name}:")
+            print(f"  Shared: {pair_data['shared_features']} ({pair_data['shared_percentage']:.1f}%)")
+            print(f"  Exclusive:")
+            for model, count in pair_data['exclusive_features'].items():
+                percentage = count / self.latent_dim * 100
+                print(f"    {model}: {count} ({percentage:.1f}%)")
+        
+        print("\n" + "=" * 60)
+        
+        # Diagnostic information
+        print("\nDIAGNOSTIC INFORMATION:")
+        print(f"Decoder norms shape: {self.decoder_norms.shape}")
+        print(f"Relative norms shape: {self.relative_norms.shape}")
+        
+        max_rel_norms = torch.max(self.relative_norms, dim=1)[0]
+        print(f"Max relative norms - Min: {max_rel_norms.min():.4f}, Max: {max_rel_norms.max():.4f}, Mean: {max_rel_norms.mean():.4f}")
+        
+        exclusive_threshold = 0.95
+        near_exclusive = torch.sum(max_rel_norms > 0.8).item()
+        very_near_exclusive = torch.sum(max_rel_norms > 0.9).item()
+        at_threshold = torch.sum(max_rel_norms > exclusive_threshold).item()
+        
+        print(f"Features with max relative norm > 0.8: {near_exclusive}")
+        print(f"Features with max relative norm > 0.9: {very_near_exclusive}")
+        print(f"Features with max relative norm > {exclusive_threshold}: {at_threshold}")
+        
+        total_decoder_norms = torch.sum(self.decoder_norms, dim=1)
+        print(f"Total decoder norms - Min: {total_decoder_norms.min():.4f}, Max: {total_decoder_norms.max():.4f}")
+        
+        zero_norms = torch.sum(self.decoder_norms < 1e-6, dim=1)
+        features_with_zero_norms = torch.sum(zero_norms > 0).item()
+        print(f"Features with near-zero decoder norms: {features_with_zero_norms}")
+        
+        print("=" * 60)
+
+    def _pair_exclusive_masks(self, model_i: int, model_j: int, thresh: float = 0.05) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Draw the exact histogram style in the paper for a single ordered pair.
+        Generate exclusivity masks for a pair of models using the paper's approach.
+        
+        Parameters:
+        -----------
+        model_i, model_j : int
+            Indices of the two models to compare
+        thresh : float
+            Threshold for exclusivity (default 0.05 as in the paper)
+            
+        Returns:
+        --------
+        mask_i, mask_j : torch.Tensor
+            Boolean masks indicating features exclusive to model i and j respectively
         """
-        if ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=(6, 4))
-
-        rel = self._pair_relative_norms(idx_a, idx_b).detach().cpu().numpy()
-
-        ax.hist(rel,
-                bins=bins,
-                color="#c48e67",               # matches paper’s tan color
-                density=False)
-        ax.set_yscale("log")
-        ax.set_xlabel("Relative decoder norm", fontsize=12, weight="bold")
-        ax.set_ylabel("Number of features",    fontsize=12, weight="bold")
-
-        # Add nice x‑tick labels like in the figure
-        ax.set_xticks([0, 0.5, 1])
-        label_a = f"Fully in {self.model_names[idx_a]}"
-        label_b = f"Fully in {self.model_names[idx_b]}"
-        ax.set_xticklabels([label_a, "Shared features", label_b], fontsize=10)
-
-        # Small vertical guides
-        ax.axvline(0,   color="k", linewidth=0.5)
-        ax.axvline(0.5, color="k", linewidth=0.5)
-        ax.axvline(1,   color="k", linewidth=0.5)
-
-        ax.set_title(f"{self.model_names[idx_a]} ↔ {self.model_names[idx_b]}", 
-                    fontsize=13, weight="bold")
-        return ax
-
-    # =============================================================
-    #  4.  Convenience: plot EVERY pair side‑by‑side
-    # =============================================================
-    def plot_all_pair_relative_norms(self,
-                                    bins: int = 60,
-                                    figsize: tuple[int, int] = (15, 4)):
+        # Get relative norms for this pair only
+        pair_norms = self.decoder_norms[:, [model_i, model_j]]  # [latent_dim, 2]
+        pair_total_norms = torch.sum(pair_norms, dim=1, keepdim=True)
+        pair_total_norms = torch.clamp(pair_total_norms, min=1e-8)
+        pair_relative_norms = pair_norms / pair_total_norms  # [latent_dim, 2]
+        
+        # r is the relative norm for model_i
+        r = pair_relative_norms[:, 0]  # [latent_dim]
+        
+        # Apply thresholds as in the paper
+        mask_i = r <= thresh  # exclusive to model i
+        mask_j = r >= (1 - thresh)  # exclusive to model j
+        
+        return mask_i, mask_j
+    
+    def plot_all_pair_relative_norms(self, figsize: Tuple[int, int] = (15, 4)) -> plt.Figure:
         """
-        Produce a row of histograms – one per ordered pair.
+        Plot paper-style relative norm histograms for all model pairs.
         """
-        pairs = list(combinations(range(self.n_models), 2))
-        fig, axes = plt.subplots(1, len(pairs), figsize=figsize,
-                                squeeze=False)
-        axes = axes[0]
+        n_pairs = self.n_models * (self.n_models - 1)  # ordered pairs
+        n_cols = min(3, n_pairs)
+        n_rows = (n_pairs + n_cols - 1) // n_cols
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+        if n_pairs == 1:
+            axes = [axes]
+        elif n_rows == 1:
+            axes = axes.reshape(1, -1)
+        axes = axes.flatten()
+        
+        plot_idx = 0
+        for i in range(self.n_models):
+            for j in range(self.n_models):
+                if i == j:
+                    continue
+                    
+                if plot_idx >= len(axes):
+                    break
+                    
+                ax = axes[plot_idx]
+                
+                # Get relative norms for this ordered pair
+                pair_norms = self.decoder_norms[:, [i, j]]  # [latent_dim, 2]
+                pair_total_norms = torch.sum(pair_norms, dim=1, keepdim=True)
+                pair_total_norms = torch.clamp(pair_total_norms, min=1e-8)
+                pair_relative_norms = pair_norms / pair_total_norms
+                
+                r = pair_relative_norms[:, 0].detach().cpu().numpy()  # relative norm for model i
+                
+                # Plot histogram
+                ax.hist(r, bins=50, alpha=0.7, color='skyblue', edgecolor='black')
+                ax.set_xlabel(f'Relative norm for {self.model_names[i]}')
+                ax.set_ylabel('Frequency')
+                ax.set_title(f'{self.model_names[i]} vs {self.model_names[j]}')
+                ax.grid(True, alpha=0.3)
+                
+                # Add threshold lines
+                ax.axvline(0.05, color='red', linestyle='--', alpha=0.7, 
+                          label=f'{self.model_names[i]} exclusive')
+                ax.axvline(0.95, color='magenta', linestyle='--', alpha=0.7, 
+                          label=f'{self.model_names[j]} exclusive')
+                ax.legend(fontsize=8)
+                
+                plot_idx += 1
+        
+        # Hide unused subplots
+        for idx in range(plot_idx, len(axes)):
+            axes[idx].set_visible(False)
+        
+        plt.tight_layout()
+        return fig
+    
+    def plot_pairwise_feature_analysis(self, figsize: Tuple[int, int] = (20, 15)) -> plt.Figure:
+        """
+        Comprehensive pairwise feature analysis dashboard.
+        """
+        n_pairs = len(self.feature_classifications_pairwise)
+        n_cols = 3
+        n_rows = (n_pairs + n_cols - 1) // n_cols
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+        if n_pairs == 1:
+            axes = [axes]
+        elif n_rows == 1:
+            axes = axes.reshape(1, -1)
+        axes = axes.flatten()
+        
+        for idx, (pair_name, classifications) in enumerate(self.feature_classifications_pairwise.items()):
+            if idx >= len(axes):
+                break
+                
+            ax = axes[idx]
+            
+            # Extract model names from pair
+            model_names = pair_name.split('_vs_')
+            model_1, model_2 = model_names[0], model_names[1]
+            
+            # Get counts
+            shared_count = len(classifications['shared'])
+            exclusive_1_count = len(classifications['exclusive'][model_1])
+            exclusive_2_count = len(classifications['exclusive'][model_2])
+            
+            # Create stacked bar chart
+            categories = ['Features']
+            shared_vals = [shared_count]
+            excl_1_vals = [exclusive_1_count]
+            excl_2_vals = [exclusive_2_count]
+            
+            width = 0.6
+            ax.bar(categories, shared_vals, width, label=f'Shared ({shared_count})', color='#2E86AB')
+            ax.bar(categories, excl_1_vals, width, bottom=shared_vals, 
+                  label=f'{model_1} Exclusive ({exclusive_1_count})', color='#F24236')
+            ax.bar(categories, excl_2_vals, width, 
+                  bottom=[s + e1 for s, e1 in zip(shared_vals, excl_1_vals)], 
+                  label=f'{model_2} Exclusive ({exclusive_2_count})', color='#F6AE2D')
+            
+            ax.set_title(f'{model_1} vs {model_2}', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Number of Features')
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            
+            # Add percentage annotations
+            total = shared_count + exclusive_1_count + exclusive_2_count
+            if total > 0:
+                shared_pct = shared_count / total * 100
+                excl_1_pct = exclusive_1_count / total * 100
+                excl_2_pct = exclusive_2_count / total * 100
+                
+                ax.text(0, shared_count/2, f'{shared_pct:.1f}%', ha='center', va='center', 
+                       fontweight='bold', color='white')
+                if exclusive_1_count > 0:
+                    ax.text(0, shared_count + exclusive_1_count/2, f'{excl_1_pct:.1f}%', 
+                           ha='center', va='center', fontweight='bold', color='white')
+                if exclusive_2_count > 0:
+                    ax.text(0, shared_count + exclusive_1_count + exclusive_2_count/2, 
+                           f'{excl_2_pct:.1f}%', ha='center', va='center', fontweight='bold', color='white')
+        
+        # Hide unused subplots
+        for idx in range(len(self.feature_classifications_pairwise), len(axes)):
+            axes[idx].set_visible(False)
+        
+        plt.suptitle('Pairwise Feature Analysis Dashboard', fontsize=16, fontweight='bold')
+        plt.tight_layout()
+        return fig
+    
+    def plot_triple_vs_pairwise_comparison(self, figsize: Tuple[int, int] = (15, 10)) -> plt.Figure:
+        """
+        Compare 3-way vs pairwise analysis results.
+        """
+        fig, axes = plt.subplots(2, 2, figsize=figsize)
+        axes = axes.flatten()
+        
+        # Plot 1: 3-way analysis pie chart
+        ax = axes[0]
+        shared_3way = len(self.feature_classifications_3way['shared'])
+        exclusive_3way = [len(self.feature_classifications_3way['exclusive'][model]) 
+                         for model in self.model_names]
+        
+        sizes = [shared_3way] + exclusive_3way
+        labels = ['Shared'] + [f'{model} Exclusive' for model in self.model_names]
+        colors = ['#2E86AB', '#F24236', '#F6AE2D', '#A23B72'][:len(sizes)]
+        
+        ax.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
+        ax.set_title('3-Way Analysis\n(All models together)', fontsize=14, fontweight='bold')
+        
+        # Plot 2: Pairwise shared features comparison
+        ax = axes[1]
+        pair_names = []
+        pair_shared = []
+        
+        for pair_name, classifications in self.feature_classifications_pairwise.items():
+            pair_names.append(pair_name.replace('_vs_', '\nvs\n'))
+            pair_shared.append(len(classifications['shared']))
+        
+        bars = ax.bar(range(len(pair_names)), pair_shared, color='#2E86AB', alpha=0.7)
+        ax.set_xlabel('Model Pairs')
+        ax.set_ylabel('Number of Shared Features')
+        ax.set_title('Pairwise Shared Features', fontsize=14, fontweight='bold')
+        ax.set_xticks(range(len(pair_names)))
+        ax.set_xticklabels(pair_names, rotation=45, ha='right')
+        
+        # Add value labels on bars
+        for bar, value in zip(bars, pair_shared):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, 
+                   str(value), ha='center', va='bottom', fontweight='bold')
+        
+        # Plot 3: Feature overlap heatmap
+        ax = axes[2]
+        overlap_matrix = np.zeros((self.n_models, self.n_models))
+        
+        for i in range(self.n_models):
+            for j in range(self.n_models):
+                if i == j:
+                    model_name = self.model_names[i]
+                    overlap_matrix[i, j] = len(self.feature_classifications_3way['exclusive'][model_name])
+                else:
+                    # Find shared features between models i and j
+                    for pair_name, classifications in self.feature_classifications_pairwise.items():
+                        if ((self.model_names[i] in pair_name and self.model_names[j] in pair_name) or
+                            (self.model_names[j] in pair_name and self.model_names[i] in pair_name)):
+                            overlap_matrix[i, j] = len(classifications['shared'])
+                            break
+        
+        im = ax.imshow(overlap_matrix, cmap='YlOrRd', aspect='auto')
+        ax.set_xticks(range(self.n_models))
+        ax.set_yticks(range(self.n_models))
+        ax.set_xticklabels(self.model_names)
+        ax.set_yticklabels(self.model_names)
+        ax.set_title('Feature Overlap Matrix\n(Diagonal: Exclusive, Off-diagonal: Shared)', 
+                    fontsize=12, fontweight='bold')
+        
+        # Add text annotations
+        for i in range(self.n_models):
+            for j in range(self.n_models):
+                ax.text(j, i, f'{overlap_matrix[i, j]:.0f}', ha='center', va='center', 
+                       color='white' if overlap_matrix[i, j] > overlap_matrix.max()/2 else 'black',
+                       fontweight='bold')
+        
+        plt.colorbar(im, ax=ax, shrink=0.8)
+        
+        # Plot 4: Summary statistics
+        ax = axes[3]
+        ax.axis('off')
+        
+        # Create summary text
+        summary_text = f"""
+ANALYSIS SUMMARY
+{'='*30}
 
-        for ax, (i, j) in zip(axes, pairs):
-            self.plot_relative_norm_hist(i, j, bins=bins, ax=ax)
+Total Features: {self.latent_dim}
 
+3-WAY ANALYSIS:
+Shared: {shared_3way} ({shared_3way/self.latent_dim*100:.1f}%)
+"""
+        
+        for i, model in enumerate(self.model_names):
+            count = exclusive_3way[i]
+            pct = count/self.latent_dim*100
+            summary_text += f"{model} Exclusive: {count} ({pct:.1f}%)\n"
+        
+        summary_text += "\nPAIRWISE ANALYSIS:\n"
+        for pair_name, classifications in self.feature_classifications_pairwise.items():
+            shared_count = len(classifications['shared'])
+            pct = shared_count/self.latent_dim*100
+            summary_text += f"{pair_name}: {shared_count} shared ({pct:.1f}%)\n"
+        
+        ax.text(0.05, 0.95, summary_text, transform=ax.transAxes, fontsize=10, 
+               verticalalignment='top', fontfamily='monospace',
+               bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+        
         plt.tight_layout()
         return fig
 
-def analyze_crosscoder(                       # ← signature unchanged for callers
+
+def analyze_crosscoder(
         crosscoder,
         activations: torch.Tensor | None = None,
         model_names: list[str] = ('dice', 'pokemon', 'merged'),
-        pair_exclusive_thresh: float = 0.05,  # ← NEW: threshold for exclusivity in a pair
-        show_pair_hist: bool = True):         # ← NEW: toggle paper‑style histograms
+        pair_exclusive_thresh: float = 0.05,
+        show_pair_hist: bool = True):
     """
-    Complete, one‑shot analysis pipeline for a CrossCoder.
+    Complete, one-shot analysis pipeline for a CrossCoder.
 
     Parameters
     ----------
     crosscoder : CrossCoder
-        The trained cross‑coder object (must expose W_dec / W_enc).
+        The trained cross-coder object (must expose W_dec / W_enc).
     activations : torch.Tensor | None
         Optional [n_samples, latent_dim] activations for density plots.
     model_names : list[str]
         Friendly names for the models in the same order as in W_dec.
     pair_exclusive_thresh : float
-        r <= thresh  → exclusive to model A
-        r >= 1‑thresh → exclusive to model B
+        r <= thresh → exclusive to model A
+        r >= 1-thresh → exclusive to model B
     show_pair_hist : bool
-        If True, will render the paper‑style relative‑norm histogram
+        If True, will render the paper-style relative-norm histogram
         for every ordered pair of models.
     """
-    # ──────────────────────────────────────────────────────────
-    #  Initialise the analysis object
-    # ──────────────────────────────────────────────────────────
+    from itertools import combinations
+    
+    # Initialize the enhanced analysis object
     analysis = CrossCoderAnalysis(crosscoder, model_names)
 
-    # ──────────────────────────────────────────────────────────
-    #  Text summary ─ triple analysis
-    # ──────────────────────────────────────────────────────────
+    # Text summary - triple analysis
     print("\n=== CROSSCODER ANALYSIS SUMMARY ===")
     print(f"Total latent dimensions : {analysis.latent_dim}")
     print(f"Number of models        : {analysis.n_models}")
@@ -784,15 +801,13 @@ def analyze_crosscoder(                       # ← signature unchanged for call
     print(f"Model names             : {analysis.model_names}")
 
     print("\n=== TRIPLE ANALYSIS (all models together) ===")
-    n_shared = len(analysis.feature_classifications['shared'])
+    n_shared = len(analysis.feature_classifications_3way['shared'])
     print(f"Shared features         : {n_shared}")
     for m in analysis.model_names:
-        n_excl = len(analysis.feature_classifications['exclusive'][m])
+        n_excl = len(analysis.feature_classifications_3way['exclusive'][m])
         print(f"{m:>10} exclusive        : {n_excl}")
 
-    # ──────────────────────────────────────────────────────────
-    #  Text summary ─ pairwise (incl. new exclusivity masks)
-    # ──────────────────────────────────────────────────────────
+    # Text summary - pairwise (including new exclusivity masks)
     print("\n=== PAIRWISE ANALYSIS ===")
     for (i, mA), (j, mB) in combinations(enumerate(analysis.model_names), 2):
         mask_a, mask_b = analysis._pair_exclusive_masks(i, j, thresh=pair_exclusive_thresh)
@@ -800,269 +815,60 @@ def analyze_crosscoder(                       # ← signature unchanged for call
         n_shared_pair = analysis.latent_dim - n_a - n_b
         print(f"{mA} ↔ {mB}:   "
               f"shared={n_shared_pair:>5}, "
-              f"{mA}‑only={n_a:>5}, "
-              f"{mB}‑only={n_b:>5}")
+              f"{mA}-only={n_a:>5}, "
+              f"{mB}-only={n_b:>5}")
 
-    # ──────────────────────────────────────────────────────────
-    #  Plots
-    # ──────────────────────────────────────────────────────────
-    # 1) Full pairwise feature breakdown (old, still useful)
+    # Plots
+    # 1) Full pairwise feature breakdown
     print("\n… generating comprehensive pairwise feature dashboard …")
     analysis.plot_pairwise_feature_analysis(figsize=(20, 15))
     plt.show()
 
-    # 2) Optional paper‑style relative‑norm histograms
+    # 2) Optional paper-style relative-norm histograms
     if show_pair_hist:
-        print("… generating paper‑style relative‑norm histograms …")
+        print("… generating paper-style relative-norm histograms …")
         analysis.plot_all_pair_relative_norms(figsize=(15, 4))
         plt.show()
 
-    # 3) Triple vs pairwise bar‑comparisons
-    print("… generating triple‑vs‑pairwise comparison plot …")
+    # 3) Triple vs pairwise bar-comparisons
+    print("… generating triple-vs-pairwise comparison plot …")
     analysis.plot_triple_vs_pairwise_comparison(figsize=(15, 10))
     plt.show()
 
-    # 4) Cosine similarity across shared features
-    print("… generating cosine‑similarity plot for shared features …")
+    # 4) 3D feature space visualization (if 3 models)
+    if analysis.n_models == 3:
+        print("… generating 3D feature space visualization …")
+        fig_3d = analysis.plot_3d_feature_space(figsize=(12, 10))
+        if fig_3d is not None:
+            plt.show()
+
+    # 6) Pairwise comparison matrix
+    print("… generating pairwise comparison matrix …")
+    analysis.plot_pairwise_comparison_matrix(figsize=(15, 10))
+    plt.show()
+
+    # 7) Cosine similarity across shared features
+    print("… generating cosine-similarity plot for shared features …")
     fig_cos = analysis.plot_cosine_similarity_shared_features(figsize=(12, 8))
     if fig_cos is not None:
         plt.show()
     else:
-        print("  (skipped ─ no shared features)")
+        print("  (skipped - no shared features)")
 
-    # 5) Feature‑density plots (if we have activations)
+    # 8) Feature-density plots (if we have activations)
     if activations is not None:
-        print("… generating feature‑density plot …")
+        print("… generating feature-density plot …")
         try:
             analysis.plot_feature_density(activations, figsize=(10, 6))
             plt.show()
         except Exception as err:
-            print(f"  regular density plot failed: {err}\n  trying log version …")
-            analysis.plot_feature_density_log(activations, figsize=(10, 6))
-            plt.show()
+            print(f"  density plot failed: {err}")
     else:
-        print("(skipping density plot ─ no activations provided)")
+        print("(skipping density plot - no activations provided)")
+
+    # 9) Print comprehensive summary
+    print("\n… printing comprehensive analysis summary …")
+    analysis.print_summary()
 
     print("\n=== ANALYSIS COMPLETE ===")
     return analysis
-
-
-# Additional helper function for quick feature statistics
-def print_feature_statistics(analysis):
-    """
-    Print detailed feature statistics from the analysis.
-    
-    Args:
-        analysis: CrossCoderAnalysis instance
-    """
-    print("\n=== DETAILED FEATURE STATISTICS ===")
-    
-    # Triple analysis statistics
-    print("\nTriple Analysis (All Models Together):")
-    shared_features = analysis.feature_classifications['shared']
-    print(f"  Shared features: {len(shared_features)}")
-    if len(shared_features) > 0:
-        print(f"  Shared feature indices (first 10): {shared_features[:10]}")
-    
-    total_exclusive = 0
-    for model_name in analysis.model_names:
-        exclusive_features = analysis.feature_classifications['exclusive'][model_name]
-        total_exclusive += len(exclusive_features)
-        print(f"  {model_name} exclusive features: {len(exclusive_features)}")
-        if len(exclusive_features) > 0:
-            print(f"    Indices (first 10): {exclusive_features[:10]}")
-    
-    print(f"  Total features accounted for: {len(shared_features) + total_exclusive}")
-    
-    # Pairwise analysis statistics
-    print("\nPairwise Analysis Details:")
-    for pair_key, pair_data in analysis.pairwise_classifications.items():
-        pair_classifications = pair_data['classifications']
-        model1_name, model2_name = pair_data['model_names']
-        
-        pair_shared = len(pair_classifications['shared'])
-        model1_exclusive = len(pair_classifications['exclusive'][model1_name])
-        model2_exclusive = len(pair_classifications['exclusive'][model2_name])
-        
-        print(f"\n  {pair_key}:")
-        print(f"    Shared: {pair_shared}")
-        print(f"    {model1_name} exclusive: {model1_exclusive}")
-        print(f"    {model2_name} exclusive: {model2_exclusive}")
-        print(f"    Total: {pair_shared + model1_exclusive + model2_exclusive}")
-
-
-# Usage example with statistics
-def analyze_crosscoder_with_stats(crosscoder, activations=None, model_names=['dice', 'pokemon', 'merged']):
-    """
-    Complete analysis pipeline with detailed statistics.
-    
-    Args:
-        crosscoder: CrossCoder instance
-        activations: Optional tensor of activations for density analysis
-        model_names: List of model names
-    """
-    # Run main analysis
-    analysis = analyze_crosscoder(crosscoder, activations, model_names)
-    
-    # Print detailed statistics
-    print_feature_statistics(analysis)
-    
-    return analysis
-
-# USAGE EXAMPLE
-"""
-# Given your setup:
-interp = CrossCoder.CrossCoder(load_my_cross)
-
-# Method 1: Quick analysis with all plots
-model_names = ['dice', 'pokemon', 'merged']
-analysis = analyze_crosscoder(interp, model_names=model_names)
-
-# Method 2: Step-by-step analysis with diagnostics
-analysis = CrossCoderAnalysis(interp, model_names)
-
-# Print summary with diagnostic information
-analysis.print_summary()
-
-# If you get all shared features (like your current result), run diagnostics:
-analysis.diagnose_feature_classification(num_examples=10)
-analysis.try_different_thresholds([0.9, 0.8, 0.7, 0.6, 0.5])
-
-# For balanced features (like your current case), try these specialized analyses:
-most_unbalanced_features, variances = analysis.analyze_balanced_features(top_k=20)
-fig_heatmap = analysis.plot_relative_norm_heatmap(figsize=(12, 8))
-plt.show()
-
-analysis.suggest_alternative_analysis()
-
-# You can manually examine the most unbalanced features
-print("\nMost unbalanced features (closest to being model-specific):")
-for i, feature_idx in enumerate(most_unbalanced_features[:5]):
-    print(f"Feature {feature_idx.item()}: variance = {variances[feature_idx]:.6f}")
-
-# If you want to force categorization with very low threshold:
-analysis.feature_classifications = analysis._classify_features(exclusive_threshold=0.4)
-print("\nWith threshold 0.4:")
-analysis.print_summary()
-
-# You can also manually set a different threshold:
-analysis.feature_classifications = analysis._classify_features(exclusive_threshold=0.8)
-analysis.print_summary()
-
-# Plot 1: Shared vs Exclusive Features Distribution
-fig1 = analysis.plot_shared_exclusive_features(figsize=(15, 5))
-plt.savefig('shared_exclusive_features.png', dpi=300, bbox_inches='tight')
-plt.show()
-
-# Plot 2: Cosine Similarity of Shared Features
-fig2 = analysis.plot_cosine_similarity_shared_features(figsize=(12, 8))
-if fig2 is not None:
-    plt.savefig('cosine_similarity_shared.png', dpi=300, bbox_inches='tight')
-    plt.show()
-
-# Plot 3: Feature Density Analysis (requires activations)
-# You need to provide activations tensor from your models
-# activations should be shape [n_samples, latent_dim]
-# where n_samples is number of activation samples you want to analyze
-
-# Example of getting activations (you'll need to adapt this to your data):
-# with torch.no_grad():
-#     # Get some sample activations from your encoder
-#     sample_data = torch.randn(1000, 3, your_activation_dim)  # 1000 samples
-#     activations = interp.W_enc.transpose(0, 2) @ sample_data.transpose(0, 1)
-#     activations = activations.transpose(0, 1)  # [1000, latent_dim]
-#     
-#     fig3 = analysis.plot_feature_density(activations, figsize=(12, 6))
-#     plt.savefig('feature_density.png', dpi=300, bbox_inches='tight')
-#     plt.show()
-
-# Access detailed results
-shared_features = analysis.feature_classifications['shared']
-dice_exclusive = analysis.feature_classifications['exclusive']['dice']
-pokemon_exclusive = analysis.feature_classifications['exclusive']['pokemon']
-merged_exclusive = analysis.feature_classifications['exclusive']['merged']
-
-print(f"Found {len(shared_features)} shared features")
-print(f"Found {len(dice_exclusive)} dice-exclusive features")
-print(f"Found {len(pokemon_exclusive)} pokemon-exclusive features")
-print(f"Found {len(merged_exclusive)} merged-exclusive features")
-
-# Get relative decoder norms for further analysis
-relative_norms = analysis.relative_norms  # [latent_dim, n_models]
-decoder_norms = analysis.decoder_norms    # [latent_dim, n_models]
-
-# You can also adjust the exclusive threshold if needed
-# Default is 0.95, but you can create a new analysis with different threshold:
-# analysis_strict = CrossCoderAnalysis(interp, model_names)
-# analysis_strict.feature_classifications = analysis_strict._classify_features(exclusive_threshold=0.99)
-"""
-
-if __name__ == '__main__':
-    from CrossCoderDataset import CrossCoderDataset
-    import CrossCoder
-    from get_dataloaders import get_dataloaders
-    from utils import seed_run
-
-    seed_run()
-    LATENT_DIM=900
-    LAMBDA_SPARSE=2
-    BATCH_SIZE_CROSS = 64
-    TRAINING_SIZE_CROSS   = 0.7
-    VALIDATION_SIZE_CROSS = 0.1 # smaller validation because we just have to tune the latent_dim hyperparam
-    TEST_SIZE_CROSS       = 0.2
-
-    ACTIVATIONS_POKEMON_PATH = './activations_layer4/pokemon'
-    ACTIVATIONS_DICE_PATH = './activations_layer4/dice'
-
-    # Crosscoder dataset with Interpolation merging technique
-    ACTIVATIONS_INTERPOLATED_PATH = './activations_layer4/interpolated'
-
-    # Method 1: Quick analysis with all plots
-    model_names = ['dice', 'pokemon', 'merged']
-    ds = CrossCoderDataset(ACTIVATIONS_POKEMON_PATH, ACTIVATIONS_DICE_PATH, ACTIVATIONS_INTERPOLATED_PATH)
-    n_acts = ds.get_n_activations()
-    interp = CrossCoder.CrossCoder(LATENT_DIM, n_acts, LAMBDA_SPARSE)
-    interp.load_state_dict(torch.load('./models/crosscoder/interpolated/model_weights.pth', weights_only=True))
-    interp.eval()
-
-    # split
-    # dataset, batch_size, training_size, validation_size, test_size, shuffle_train=True
-    train_loader, val_loader, test_loader = get_dataloaders(
-        ds, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS, shuffle_train=False
-    )
-
-    # TODO!!!!!! implementazione new features (differenza tra set)
-    analyze_crosscoder(interp)
-    # min, max = interp.W_enc.min(), interp.W_enc.max()
-    # interp.W_enc.data = (interp.W_enc - min)/(max - min)
-
-
-    # # analysis = analyze_crosscoder(interp, model_names=model_names)
-
-    # # # Method 2: Step-by-step analysis with diagnostics
-    # analysis = CrossCoderAnalysis(interp, model_names)
-
-
-    # from torch.nn.functional import relu
-    # print("\n" + "="*60)
-    # print("PLOTTING E VISUALIZZAZIONE")
-    # print("="*60)
-
-    # min, max = interp.W_enc.min(), interp.W_enc.max()
-    # interp.W_enc.data = (interp.W_enc - min)/(max - min)
-
-    # # Usa tutti i dati disponibili
-    # all_original_activations = []
-    # for i, data in enumerate(test_loader):
-    #     if i >= 10:  # Limita per performance
-    #         break
-    #     with torch.no_grad():
-    #         acts = relu(interp.encode(data))
-    #         all_original_activations.append(acts)
-    
-    # all_original_activations = torch.cat(all_original_activations, dim=0)
-
-    # fig = analysis.plot_feature_density_log(all_original_activations,
-    #                                 figsize=(12,6),
-    #                                 activation_threshold=0.1)
-    # plt.show()
