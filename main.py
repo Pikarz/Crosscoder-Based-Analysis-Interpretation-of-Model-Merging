@@ -33,8 +33,8 @@ COMPUTE_AVG_ACTS            = False
 COMPUTE_PCB_ACTS            = False
 
 # Load the corresponding datasets (train & val, test) in memory -- We suggest to train one model at a time because it is very GPU-intensive
-LOAD_INTERPOLATION_CROSS_DS       = False
-LOAD_AVG_CROSS_DS                 = False
+LOAD_INTERPOLATION_CROSS_DS       = True
+LOAD_AVG_CROSS_DS                 = True
 LOAD_PCB_CROSS_DS                 = True
 
 ### CROSSCODER CONFIG ###
@@ -42,7 +42,7 @@ TRAIN_CROSSCODER            = False  # Train or use the already-trained crosscod
 TEST_CROSSCODER             = True  # Test/analysis crosscoder
 
 ### OTHER PARAMS ###
-PROJECT_NAME                = 'deep_learning_final_lmao'
+PROJECT_NAME                = 'deep_learning_crosscoder'
 
 # Same across all the fine-tuned models
 BATCH_SIZE      = 32
@@ -537,7 +537,7 @@ if __name__ == '__main__':
             from CrossCoder import CrossCoder
             
             if LOAD_INTERPOLATION_CROSS_DS:
-                crosscoder = CrossCoder(LATENT_DIM, 100352, LAMBDA_SPARSE)
+                crosscoder = CrossCoder(LATENT_DIM, interpolated_suite['n_activations'], LAMBDA_SPARSE)
                 crosscoder.load_state_dict(torch.load(CROSS_INTERPOLATED_WEIGHTS_PATH, weights_only=True))
                 crosscoder.eval()
                 analyze_crosscoder(
@@ -546,7 +546,7 @@ if __name__ == '__main__':
                 )
 
             if LOAD_AVG_CROSS_DS:
-                crosscoder = CrossCoder(LATENT_DIM, 100352, LAMBDA_SPARSE)
+                crosscoder = CrossCoder(LATENT_DIM, avg_suite['n_activations'], LAMBDA_SPARSE)
                 crosscoder.load_state_dict(torch.load(CROSS_PARAM_AVG_WEIGHTS_PATH, weights_only=True))
                 crosscoder.eval()
                 analyze_crosscoder(
@@ -555,7 +555,7 @@ if __name__ == '__main__':
                 )
         
             if LOAD_PCB_CROSS_DS:
-                crosscoder = CrossCoder(LATENT_DIM, 100352, LAMBDA_SPARSE)
+                crosscoder = CrossCoder(LATENT_DIM, pcb_suite['n_activations'], LAMBDA_SPARSE)
                 crosscoder.load_state_dict(torch.load(CROSS_PCB_WEIGHTS_PATH, weights_only=True))
                 crosscoder.eval()
                 analyze_crosscoder(

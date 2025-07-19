@@ -1,12 +1,9 @@
 import einops
 import torch
 from torch import nn
-from torch.nn.utils import clip_grad_norm_
 import torch.nn.functional as F
 from tqdm import tqdm, trange
-from torch.optim.lr_scheduler import ExponentialLR, OneCycleLR
-import wandb
-import copy
+from torch.optim.lr_scheduler import OneCycleLR
 
 N_MODELS = 3
 
@@ -112,8 +109,7 @@ class CrossCoder(nn.Module):
     self.total_steps = len(train_loader)*num_epochs
    
     optimizer = torch.optim.Adam(
-        self.parameters(),
-       # betas=(adam_beta_1, adam_beta_2),
+        self.parameters()
     )
 
     scheduler = OneCycleLR(
@@ -122,14 +118,6 @@ class CrossCoder(nn.Module):
         steps_per_epoch=len(train_loader),
         epochs=num_epochs
     )
-
-    # scheduler = torch.optim.lr_scheduler.LambdaLR(
-    #         optimizer, self.lr_lambda
-    # )
-
-   # scheduler = ExponentialLR(optimizer, gamma=0.9)
-
-    ### TODO WANDB  STUFF ###
 
     train_losses = []
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -173,23 +161,12 @@ class CrossCoder(nn.Module):
       #  self.current_step = 0 # At each epoch, we reset the step
 
         print(f'\nEpoch {epoch + 1}, Average Training Loss: {avg_train_loss:.4f}. L2 Loss: {l2_loss:.4f}, L1 Loss: {l1_loss:.4f}')
-
-        # run.log({
-        #     "epoch": epoch + 1,
-        #     "train/loss": avg_train_loss,
-        # })
-
         
     print('[OK] Finished CrossCoder Training')
     return self
-
-    # finally:
-    #     wandb.finish()
-
+  
   def val_cross(self, val_loader):
     print('[DEBUG] Start Validation')
-
-    ### TODO WANDB  STUFF ###
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     self.to(device)
@@ -213,9 +190,4 @@ class CrossCoder(nn.Module):
 
         print(f'[DEBUG] Validation Loss: {running_loss}')
 
-        # run.log({
-        #     "epoch": epoch + 1,
-        #     "train/loss": avg_train_loss,
-        # })
-            
         print('[OK] Finished CrossCoder Evaluation')
