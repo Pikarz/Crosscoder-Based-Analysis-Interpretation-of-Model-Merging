@@ -128,103 +128,6 @@ TEST_SIZE_CROSS       = 0.2
 LR_CROSS = 0.0005
 LAMBDA_SPARSE = 1.7
 
-# LR_CROSS = 0.0006
-# LAMBDA_SPARSE = 1.7
-# dopo claudio sempre alte dice poco il resto
-
-
-# loss l1 su z:
-# LR_CROSS = 0.0008
-# LAMBDA_SPARSE = 1.5
-# buon risultato (875 shared) ma tante feature esclusive su dice (23) e poche gli altri due.
-# mean cosine ~0.43
-
-# LR_CROSS = 0.0015
-# LAMBDA_SPARSE = 1
-# 897 shared, cosine 0.5~
-
-# LR_CROSS = 0.003
-# LAMBDA_SPARSE = 1
-# niente
-
-# LR_CROSS = 0.0007
-# LAMBDA_SPARSE = 1.7
-# simile all'altro (867 shared) e sempre molte su dice e poche gli altri
-# mean cosine ~0.52 
-
-# LR_CROSS = 0.0006
-# LAMBDA_SPARSE = 1.7
-# simile ai precedenti (842 shared)
-
-# LR_CROSS = 0.0005
-# LAMBDA_SPARSE = 1.8
-# simile a prima (844 shared)
-
-# LR_CROSS = 0.0009
-# LAMBDA_SPARSE = 1.6
-# 892 shared tipo
-
-# LR_CROSS = 0.001
-# LAMBDA_SPARSE = 0.75
-# 899 shared
-
-# LR_CROSS = 0.0006
-# LAMBDA_SPARSE = 1.8
-# simile ai precedenti (862 shared) sempre troppe dice
-# mean cosine ~0.51
-
-# LR_CROSS = 0.0005
-# LAMBDA_SPARSE = 1.5
-# poche features imparate
-
-# LR_CROSS = 0.0005
-# LAMBDA_SPARSE = 2
-# non ha imparato niente
-
-# LR_CROSS = 0.001
-# LAMBDA_SPARSE = 2.5
-# niente
-
-# LR_CROSS = 0.0007
-# LAMBDA_SPARSE = 2
-# non ha imparato nulla ma cosine alta
-
-# LR_CROSS = 0.001
-# LAMBDA_SPARSE = 1.5 
-# male (897 shared). cosine ~0.43
-
-# LR_CROSS = 0.001
-# LAMBDA_SPARSE = 1.25
-# non ha imparato nulla
-
-# LR_CROSS = 0.001
-# LAMBDA_SPARSE = 1.8
-# non ha imparato ma cosine ~0.5
-
-# LR_CROSS = 0.001
-# LAMBDA_SPARSE = 1.65
-# solo 1 feature trovata
-
-# LR_CROSS = 0.001
-# LAMBDA_SPARSE = 1.4
-# come sopra
-
-# LR_CROSS = 0.0009
-# LAMBDA_SPARSE = 1.7
-# come sopra
-
-# loss l1 su u:
-# LR_CROSS = 0.000005
-# LAMBDA_SPARSE = 3
-# borderline -- molte feature exclusive (specialmente pkmn e pochi dice)
-
-# LR_CROSS = 0.000006
-# LAMBDA_SPARSE = 2.7
-# bruttino -- poche exclusive
-
-
-
-
 CROSSCODER_WANDB_CONFIG   = {
     "Lambda Sparse": LAMBDA_SPARSE,
     "lr": LR_CROSS,
@@ -503,48 +406,6 @@ if __name__ == '__main__':
             create_crosscoder_dataset(pokemon_dataset, dice_dataset, small_imagenet_dataset, RESNET_BATCH_SIZE,\
                             [pcb_net],
                             [ACTIVATIONS_PCB_PATH], N_CROSSCODER_DATAPOINTS, REGEX_ACTIVATIONS)
-        ### Saving Merged Activations ###
-       # datasets = (pokemon_dataset, dice_dataset, small_imagenet_dataset)
-
-        # Save the activations of the desired merged models
-        # save_merge_activations(
-        #     COMPUTE_INTERPOLATION_ACTS,
-        #     name='Interpolated',
-        #     model_dir=OUT_INTERPOLATED_DIR,
-        #     model_head=DEFAULT_INTERPOLATED_RESNET_HEAD,
-        #     act_paths=[ACTIVATIONS_INTERPOLATED_PATH],
-        #     datasets=datasets,
-        #     batch_size=RESNET_BATCH_SIZE,
-        #     n_points=N_CROSSCODER_DATAPOINTS,
-        #     regex=REGEX_ACTIVATIONS
-        # )
-
-        # save_merge_activations(
-        #     COMPUTE_AVG_ACTS,
-        #     name='Averaging',
-        #     model_dir=OUT_PARAM_AVERAGE_DIR,
-        #     model_head=DEFAULT_AVG_RESNET_HEAD,
-        #     act_paths=[ACTIVATIONS_PARAM_AVG_PATH],
-        #     datasets=datasets,
-        #     batch_size=RESNET_BATCH_SIZE,
-        #     n_points=N_CROSSCODER_DATAPOINTS,
-        #     regex=REGEX_ACTIVATIONS
-        # )
-
-        # save_merge_activations(
-        #     COMPUTE_PCB_ACTS,
-        #     name='PCB',
-        #     model_dir=OUT_PCB_DIR,
-        #     model_head=PKMN_PCB_HEAD,
-        #     act_paths=[ACTIVATIONS_PCB_PATH],
-        #     datasets=datasets,
-        #     batch_size=RESNET_BATCH_SIZE,
-        #     n_points=N_CROSSCODER_DATAPOINTS,
-        #     regex=REGEX_ACTIVATIONS,
-        #     num_classes=PKMN_NUM_CLASSES
-        # )
-
-        ### End Saving Merged Activations ###
 
     #### Start CrossCoder Stuff ####
     if TRAIN_CROSSCODER or TEST_CROSSCODER:
@@ -552,33 +413,29 @@ if __name__ == '__main__':
 
         from CrossCoderDataset import CrossCoderDataset
 
-        # Crosscoder Training
-        if TRAIN_CROSSCODER:
-            
-            # We train crosscoder with activations dataset from interpolation merge model
-            if LOAD_INTERPOLATION_CROSS_DS:
-                # build dataset
-                ds = CrossCoderDataset(ACTIVATIONS_POKEMON_PATH, ACTIVATIONS_DICE_PATH, ACTIVATIONS_INTERPOLATED_PATH)
-                n_acts = ds.get_n_activations()
+        # We train crosscoder with activations dataset from interpolation merge model
+        if LOAD_INTERPOLATION_CROSS_DS:
+            # build dataset
+            ds = CrossCoderDataset(ACTIVATIONS_POKEMON_PATH, ACTIVATIONS_DICE_PATH, ACTIVATIONS_INTERPOLATED_PATH)
+            n_acts = ds.get_n_activations()
 
-                # split
-                # dataset, batch_size, training_size, validation_size, test_size, shuffle_train=True
-                train_loader, val_loader, test_loader = get_dataloaders(
-                    ds, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS, shuffle_train=False
-                )
-                total_steps = len(train_loader)
+            train_loader, val_loader, test_loader = get_dataloaders(
+                ds, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS
+            )
+            total_steps = len(train_loader)
 
-                interpolated_suite = {
-                    "name": 'test',
-                    "dataset": ds,
-                    "n_activations": n_acts,
-                    "train_loader": train_loader,
-                    "val_loader": val_loader,
-                    "test_loader": test_loader,
-                    "weights_path": CROSS_INTERPOLATED_WEIGHTS_PATH,
-                    "total_steps": total_steps,
-                }
+            interpolated_suite = {
+                "name": 'test',
+                "dataset": ds,
+                "n_activations": n_acts,
+                "train_loader": train_loader,
+                "val_loader": val_loader,
+                "test_loader": test_loader,
+                "weights_path": CROSS_INTERPOLATED_WEIGHTS_PATH,
+                "total_steps": total_steps,
+            }
 
+            if TRAIN_CROSSCODER:
                 train_crosscoder_and_save_weights(
                     LATENT_DIM,
                     interpolated_suite['n_activations'],
@@ -593,32 +450,33 @@ if __name__ == '__main__':
                     project_name=PROJECT_NAME,
                     description='Crosscoder -- Interpolated Merging'
                 )
-                
-            # We train crosscoder with activations dataset from parameter averaging merge model
-            if LOAD_AVG_CROSS_DS:
-                # build dataset
-                ds = CrossCoderDataset(ACTIVATIONS_POKEMON_PATH, ACTIVATIONS_DICE_PATH, ACTIVATIONS_PARAM_AVG_PATH)
-                n_acts = ds.get_n_activations()
+            
+        # We train crosscoder with activations dataset from parameter averaging merge model
+        if LOAD_AVG_CROSS_DS:
+            # build dataset
+            ds = CrossCoderDataset(ACTIVATIONS_POKEMON_PATH, ACTIVATIONS_DICE_PATH, ACTIVATIONS_PARAM_AVG_PATH)
+            n_acts = ds.get_n_activations()
 
-                # split
-                # dataset, batch_size, training_size, validation_size, test_size, shuffle_train=True
-                train_loader, val_loader, test_loader = get_dataloaders(
-                    ds, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS, shuffle_train=False
-                )
-                total_steps = len(train_loader)
+            # split
+            # dataset, batch_size, training_size, validation_size, test_size
+            train_loader, val_loader, test_loader = get_dataloaders(
+                ds, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS
+            )
+            total_steps = len(train_loader)
 
-                
-                avg_suite = {
-                    "name": 'param_avg',
-                    "dataset": ds,
-                    "n_activations": n_acts,
-                    "train_loader": train_loader,
-                    "val_loader": val_loader,
-                    "test_loader": test_loader,
-                    "weights_path": CROSS_PARAM_AVG_WEIGHTS_PATH,
-                    "total_steps": total_steps,
-                }
+            
+            avg_suite = {
+                "name": 'param_avg',
+                "dataset": ds,
+                "n_activations": n_acts,
+                "train_loader": train_loader,
+                "val_loader": val_loader,
+                "test_loader": test_loader,
+                "weights_path": CROSS_PARAM_AVG_WEIGHTS_PATH,
+                "total_steps": total_steps,
+            }
 
+            if TRAIN_CROSSCODER:
                 train_crosscoder_and_save_weights(
                     LATENT_DIM,
                     avg_suite['n_activations'],
@@ -634,30 +492,31 @@ if __name__ == '__main__':
                     description='Crosscoder -- Soup Merging'
                 )
 
-            # We train crosscoder with activations dataset from PCB merge model
-            if LOAD_PCB_CROSS_DS:
-                # build dataset
-                ds = CrossCoderDataset(ACTIVATIONS_POKEMON_PATH, ACTIVATIONS_DICE_PATH, ACTIVATIONS_PCB_PATH)
-                n_acts = ds.get_n_activations()
+        # We train crosscoder with activations dataset from PCB merge model
+        if LOAD_PCB_CROSS_DS:
+            # build dataset
+            ds = CrossCoderDataset(ACTIVATIONS_POKEMON_PATH, ACTIVATIONS_DICE_PATH, ACTIVATIONS_PCB_PATH)
+            n_acts = ds.get_n_activations()
 
-                # split
-                # dataset, batch_size, training_size, validation_size, test_size, shuffle_train=True
-                train_loader, val_loader, test_loader = get_dataloaders(
-                    ds, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS, shuffle_train=False
-                )
-                total_steps = len(train_loader)
+            # split
+            # dataset, batch_size, training_size, validation_size, test_size
+            train_loader, val_loader, test_loader = get_dataloaders(
+                ds, BATCH_SIZE_CROSS, TRAINING_SIZE_CROSS, VALIDATION_SIZE_CROSS, TEST_SIZE_CROSS
+            )
+            total_steps = len(train_loader)
 
-                pcb_suite = {
-                    "name": 'pcb',
-                    "dataset": ds,
-                    "n_activations": n_acts,
-                    "train_loader": train_loader,
-                    "val_loader": val_loader,
-                    "test_loader": test_loader,
-                    "weights_path": CROSS_PCB_WEIGHTS_PATH,
-                    "total_steps": total_steps,
-                }
+            pcb_suite = {
+                "name": 'pcb',
+                "dataset": ds,
+                "n_activations": n_acts,
+                "train_loader": train_loader,
+                "val_loader": val_loader,
+                "test_loader": test_loader,
+                "weights_path": CROSS_PCB_WEIGHTS_PATH,
+                "total_steps": total_steps,
+            }
 
+            if TRAIN_CROSSCODER:
                 train_crosscoder_and_save_weights(
                     LATENT_DIM,
                     pcb_suite['n_activations'],
@@ -673,12 +532,6 @@ if __name__ == '__main__':
                     description='Crosscoder -- PCB Merging'
                 )
         
-        # import CrossCoder
-        # ds = CrossCoderDataset('./activations_layer4')
-        # n_acts = ds.get_n_activations()
-        # crosscoder = CrossCoder.CrossCoder(LATENT_DIM, n_acts, LAMBDA_SPARSE)
-        # crosscoder.load_state_dict(torch.load('./models/crosscoder/interpolated/model_weights.pth', weights_only=True))
-        # crosscoder.eval()
 
         if TEST_CROSSCODER: # Actual analysis
             from CrossCoder import CrossCoder
@@ -688,7 +541,8 @@ if __name__ == '__main__':
                 crosscoder.load_state_dict(torch.load(CROSS_INTERPOLATED_WEIGHTS_PATH, weights_only=True))
                 crosscoder.eval()
                 analyze_crosscoder(
-                    crosscoder
+                    crosscoder,
+                    interpolated_suite['test_loader']
                 )
 
             if LOAD_AVG_CROSS_DS:
@@ -696,7 +550,8 @@ if __name__ == '__main__':
                 crosscoder.load_state_dict(torch.load(CROSS_PARAM_AVG_WEIGHTS_PATH, weights_only=True))
                 crosscoder.eval()
                 analyze_crosscoder(
-                    crosscoder
+                    crosscoder,
+                    avg_suite['test_loader']
                 )
         
             if LOAD_PCB_CROSS_DS:
@@ -704,7 +559,8 @@ if __name__ == '__main__':
                 crosscoder.load_state_dict(torch.load(CROSS_PCB_WEIGHTS_PATH, weights_only=True))
                 crosscoder.eval()
                 analyze_crosscoder(
-                    crosscoder
+                    crosscoder,
+                    pcb_suite['test_loader']
                 )
 
     #### End CrossCoder Stuff ####
