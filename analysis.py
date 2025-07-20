@@ -141,21 +141,55 @@ class CrossCoderAnalysis:
         return fig
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-    def plot_relative_norm_histograms(self, *, bins: int = 50, figsize: Tuple[int, int] = (14, 4)) -> plt.Figure:  # unchanged
+    def plot_relative_norm_histograms(
+        self, *, bins: int = 50, figsize: Tuple[int, int] = (14, 4)
+    ) -> plt.Figure:             # unchanged signature
         fig, axes = plt.subplots(1, 3, figsize=figsize, sharey=True)
+
         for ax, (i, j) in zip(axes, combinations(range(3), 2)):
             pair_name = f"{self.model_names[i]} vs {self.model_names[j]}"
             pair_norms = self.decoder_norms[:, [i, j]]
+
+            # ratio of model-i norm to (model-i + model-j)
             rel = pair_norms[:, 0] / torch.clamp(pair_norms.sum(dim=1), min=1e-8)
             r = rel.cpu().detach().numpy()
+
+            # histogram + guide lines
             ax.hist(r, bins=bins, alpha=0.75, edgecolor="black")
-            ax.axvline(0.05, ls="--", color="#E74C3C", lw=1)
-            ax.axvline(0.95, ls="--", color="#4BADE8", lw=1)
+            ax.axvline(0.05, ls="--", color="#E74C3C", lw=1)   # mostly model-j
+            ax.axvline(0.95, ls="--", color="#4BADE8", lw=1)   # mostly model-i
+
+            # axis titles
             ax.set_title(pair_name)
-            ax.set_xlabel(f"rel‑norm ({self.model_names[i]})")
+            ax.set_xlabel(f"rel-norm ({self.model_names[i]})")
+
+            # --- NEW: colour-coded labels for the extremes -------------
+            ax.text(
+                0.0, -0.12,                 # left edge, just below the axis
+                self.model_names[j],
+                transform=ax.transAxes,
+                ha="left", va="top",
+                color="#E74C3C",
+                fontsize=9,
+                clip_on=False,
+            )
+            ax.text(
+                1.0, -0.12,                 # right edge
+                self.model_names[i],
+                transform=ax.transAxes,
+                ha="right", va="top",
+                color="#4BADE8",
+                fontsize=9,
+                clip_on=False,
+            )
+
         axes[0].set_ylabel("#features")
-        fig.suptitle("Relative‑norm histograms (unordered pairs)")
+        fig.suptitle("Relative-norm histograms")
+
+        # give the extra room for the new labels
+        fig.subplots_adjust(bottom=0.18)
         fig.tight_layout()
+
         return fig
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
